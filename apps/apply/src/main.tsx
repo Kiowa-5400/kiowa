@@ -26,6 +26,7 @@ type FormState = {
   state: string;
   zip: string;
   application_type: ApplicationType;
+  documentation_method: 'background_check' | 'concealed_carry';
   payment_method: 'card' | 'check' | 'cash';
   membership_notes: string;
   signature: string;
@@ -43,7 +44,7 @@ const defaultFormDefinition: FormDefinition = {
       {
         label: 'NRA Membership Proof',
         required: true,
-        description: 'Upload an image of your NRA membership card or mailing label.',
+        description: 'Upload an image of your NRA membership card or magazine mailing label.',
       },
       {
         label: 'Range Cleanup Discount Card',
@@ -53,19 +54,14 @@ const defaultFormDefinition: FormDefinition = {
     ],
     waiting_list: [
       {
-        label: 'Background Check Cover Page',
+        label: 'Background Check OR Concealed Carry License',
         required: true,
-        description: 'Upload the cover page from the criminalwatchdog.com background check report.',
-      },
-      {
-        label: 'Concealed Carry License',
-        required: false,
-        description: 'Optional alternative: upload a concealed carry license from any state.',
+        description: 'Choose either a background-check report cover page or a concealed-carry license image.',
       },
     ],
   },
   rules_text:
-    'Range flag at gate must be raised anytime you are on the property. Range flag at firing line must be raised when shooting on the line or downrange.\n\nAll shooting on rifle ranges MUST be done from the permanent firing line.\n\nI will not shoot when work crews are on the range.\n\nI will follow all of the safety rules and guidelines I have been taught about safe gunhandling. I am responsible for my guest\'s actions while on property.',
+    'Kiowa Gun Club Range Rules\n\n1. Range flag at gate must be raised anytime you are on the property. Range flag at firing line must be raised when shooting on the line or downrange.\n2. All shooting on rifle ranges MUST be done from the permanent firing line.\n3. I will not shoot when work crews are on the range.\n4. I will follow all of the safety rules and guidelines I have been taught about safe gunhandling. I am responsible for my guest\'s actions while on property.\n5. I will NOT shoot center fire rifles, including .223 pistols, toward or in pistol ranges #1 and #2.\n6. I will follow the club calendar, as scheduled events will take precedence.\n7. I will not shoot with artificial lighting.\n8. I will take all my targets and trash I brought to the range home, or deposit in trash cans provided. I WILL NOT LEAVE MY TARGETS ON THE BACKER BOARDS.\n9. I will only shoot at targets that are safe, NOT trash cans, rocks, or other items that may cause ricochets.\n10. During scheduled shoots, modified rules may apply.\n11. No hunting of any kind is allowed on club property.\n12. Shotgun shooting is NOT ALLOWED on club property. This includes handguns while shooting shotshells.\n13. A member must accompany guests at all times.\n14. Vehicles are allowed to be driven to the backstops to set up or check targets, provided they stay on the rock. No vehicles are allowed behind the backstops.\n15. No alcoholic beverages are allowed on club property at any time.\n16. Eye and ear protection is required at all matches. We recommend using them whenever you are shooting.\n17. Do not leave live rounds lying on the range. Dispose of them in the misfire container located at the end of the backstop between ranges #1 and #2.\n18. The use of binary explosives is prohibited. (Tannerite, Shockwave, etc.)\n19. The gun club requires proof of background check or concealed carry license.\n\nI have read, understand, and agree to follow the Kiowa Gun Club Range Rules.',
 };
 
 const initialFormState: FormState = {
@@ -78,6 +74,7 @@ const initialFormState: FormState = {
   state: '',
   zip: '',
   application_type: 'renew_membership',
+  documentation_method: 'background_check',
   payment_method: 'card',
   membership_notes: '',
   signature: '',
@@ -122,6 +119,10 @@ function App() {
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setFormState((current) => ({ ...current, [field]: value }));
   };
+
+  const triggerDocumentLabel = formState.application_type === 'waiting_list'
+    ? 'Background Check OR Concealed Carry License'
+    : 'NRA Membership Proof';
 
   const handleDocumentUpload = (event: ChangeEvent<HTMLInputElement>, label: string) => {
     const file = event.target.files?.[0];
@@ -180,6 +181,12 @@ function App() {
     setIsSubmitting(true);
 
     try {
+      const documents = { ...formState.documents };
+      if (formState.application_type === 'waiting_list') {
+        const documentKey = 'Background Check OR Concealed Carry License';
+        documents[documentKey] = documents[documentKey] || 'document-uploaded';
+      }
+
       const response = await fetch('http://localhost:8000/api/application/submit', {
         method: 'POST',
         headers: {
@@ -187,7 +194,8 @@ function App() {
         },
         body: JSON.stringify({
           ...formState,
-          documents: Object.keys(formState.documents),
+          application_type: formState.application_type,
+          documents,
         }),
       });
 
@@ -297,6 +305,28 @@ function App() {
 
         <section className="card">
           <h2>Required documentation</h2>
+          {formState.application_type === 'waiting_list' && (
+            <div className="stacked-grid two-up" style={{ marginBottom: '1rem' }}>
+              <label className={`option-card ${formState.documentation_method === 'background_check' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="documentation_method"
+                  checked={formState.documentation_method === 'background_check'}
+                  onChange={() => updateField('documentation_method', 'background_check')}
+                />
+                <span>Background Check</span>
+              </label>
+              <label className={`option-card ${formState.documentation_method === 'concealed_carry' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="documentation_method"
+                  checked={formState.documentation_method === 'concealed_carry'}
+                  onChange={() => updateField('documentation_method', 'concealed_carry')}
+                />
+                <span>Concealed Carry License</span>
+              </label>
+            </div>
+          )}
           <div className="documents-list">
             {documentRequirements.map((requirement) => (
               <div key={requirement.label} className="doc-item">

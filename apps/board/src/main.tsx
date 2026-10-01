@@ -1,14 +1,45 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles.css';
 
-const applications = [
-  { name: 'Maya Johnson', type: 'Renewal', status: 'Awaiting review', amount: '$150' },
-  { name: 'Chris Lee', type: 'Waiting list', status: 'Documents missing', amount: '$0' },
-  { name: 'Alicia Gomez', type: 'Renewal', status: 'Approved', amount: '$150' },
-];
+type DashboardSummary = {
+  pending: number;
+  approved: number;
+  waiting_list: number;
+  total: number;
+};
+
+type Submission = {
+  id: number;
+  name: string;
+  type: string;
+  status: string;
+  amount: number;
+};
 
 function App() {
+  const [summary, setSummary] = useState<DashboardSummary>({ pending: 0, approved: 0, waiting_list: 0, total: 0 });
+  const [applications, setApplications] = useState<Submission[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/board/dashboard');
+        if (!response.ok) {
+          throw new Error('Unable to load dashboard.');
+        }
+        const payload = await response.json();
+        setSummary(payload.summary);
+        setApplications(payload.recent_applications || []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load dashboard.');
+      }
+    };
+
+    void loadDashboard();
+  }, []);
+
   return (
     <main className="board-shell">
       <header className="board-header">
@@ -19,18 +50,20 @@ function App() {
         <button className="primary-button">Export report</button>
       </header>
 
+      {error && <p className="alert error">{error}</p>}
+
       <section className="stats-grid">
         <article className="stat-card">
           <span>Pending</span>
-          <strong>12</strong>
+          <strong>{summary.pending}</strong>
         </article>
         <article className="stat-card">
           <span>Approved</span>
-          <strong>38</strong>
+          <strong>{summary.approved}</strong>
         </article>
         <article className="stat-card">
           <span>Waiting list</span>
-          <strong>6</strong>
+          <strong>{summary.waiting_list}</strong>
         </article>
       </section>
 
@@ -46,14 +79,20 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {applications.map((app) => (
-              <tr key={app.name}>
-                <td>{app.name}</td>
-                <td>{app.type}</td>
-                <td><span className="status-pill">{app.status}</span></td>
-                <td>{app.amount}</td>
+            {applications.length === 0 ? (
+              <tr>
+                <td colSpan={4}>No applications found yet.</td>
               </tr>
-            ))}
+            ) : (
+              applications.map((app) => (
+                <tr key={app.id}>
+                  <td>{app.name}</td>
+                  <td>{app.type}</td>
+                  <td><span className="status-pill">{app.status}</span></td>
+                  <td>${Number(app.amount || 0).toFixed(2)}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </section>

@@ -4,3 +4,5 @@ pydantic==2.9.2
 python-dotenv==1.0.1
 sqlalchemy==2.0.35
 psycopg[binary]==3.3.6
+pytest==9.1.1
+httpx==0.28.1
