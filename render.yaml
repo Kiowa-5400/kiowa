@@ -47,11 +47,19 @@ envVarGroups:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: EMAIL_PROVIDER
-        value: resend
-      - key: RESEND_API_KEY
+        value: smtp
+      - key: SMTP_HOST
         sync: false
-      - key: RESEND_WEBHOOK_SECRET
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
         sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: SMTP_USE_SSL
+        value: "false"
       - key: EMAIL_FROM_ADDRESS
         sync: false
       - key: EMAIL_FROM_NAME
@@ -59,12 +67,8 @@ envVarGroups:
       - key: EMAIL_REPLY_TO
         sync: false
       - key: SMS_PROVIDER
-        value: twilio
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
+        value: gateway
+      - key: VERIPHONE_API_KEY
         sync: false
       - key: CRON_SECRET
         generateValue: true
