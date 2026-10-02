@@ -188,7 +188,7 @@ function App() {
         documents[documentKey] = documents[documentKey] || 'document-uploaded';
       }
 
-      const response = await fetch('http://localhost:8000/api/application/submit', {
+      const response = await fetch(`${apiBaseUrl}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
