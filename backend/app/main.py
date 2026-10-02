@@ -241,7 +241,9 @@ def register_person(payload: dict[str, Any], db: Session = Depends(get_db)) -> d
     last_name = str(payload.get("last_name", "")).strip()
     email = str(payload.get("email", "")).strip().lower()
     password = str(payload.get("password", ""))
-    role = str(payload.get("role", "visitor")).strip().lower() or "visitor"
+    # Public registration can never create or promote a board account.
+    # Board accounts are provisioned through the dedicated board-auth flow below.
+    role = "visitor"
 
     if not all([first_name, last_name, email, password]):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Please provide your name, email, and password.")
@@ -282,6 +284,67 @@ def login_person(payload: dict[str, Any], db: Session = Depends(get_db)) -> dict
         logger.warning("authentication_failed", extra={"email": email})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
     logger.info("authentication_succeeded", extra={"person_id": person.id, "email": person.email})
+    return {"token": _create_auth_token(person), "person": _serialize_person(person)}
+
+
+@app.post("/api/auth/board-login")
+def board_login(payload: dict[str, Any], db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Authenticate a board member using server-side board credentials.
+
+    BOARD_EMAIL and BOARD_PASSWORD must be configured as deployment secrets.
+    The credentials are never accepted through public registration.
+    """
+    configured_email = os.getenv("BOARD_EMAIL", "").strip().lower()
+    configured_password = os.getenv("BOARD_PASSWORD", "")
+
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+
+    if not configured_email or not configured_password:
+        logger.error("board_auth_not_configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Board authentication is not configured.",
+        )
+
+    email_matches = hmac.compare_digest(email, configured_email)
+    password_matches = hmac.compare_digest(password, configured_password)
+
+    if not email_matches or not password_matches:
+        logger.warning("board_authentication_failed", extra={"email": email})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid board credentials.",
+        )
+
+    person = db.query(Person).filter(Person.email == configured_email).first()
+
+    if person is None:
+        person = Person(
+            first_name="Board",
+            last_name="Member",
+            email=configured_email,
+            phone=None,
+            address=None,
+            city=None,
+            state=None,
+            zip_code=None,
+            password_hash=None,
+            role="board",
+            status="active",
+        )
+        db.add(person)
+        db.commit()
+        db.refresh(person)
+    elif person.role != "board":
+        # A matching board credential is authoritative for the dedicated
+        # board account, while public registration can no longer set role=board.
+        person.role = "board"
+        person.status = "active"
+        db.commit()
+        db.refresh(person)
+
+    logger.info("board_authentication_succeeded", extra={"person_id": person.id})
     return {"token": _create_auth_token(person), "person": _serialize_person(person)}
 
 
