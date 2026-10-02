@@ -118,7 +118,7 @@ class SmsProvider(Protocol):
 
 
 class GatewaySmsProvider:
-    """Veriphone carrier lookup (cached on the person) + Resend to the carrier gateway."""
+    """Veriphone carrier lookup (cached on the person) + the club mailbox SMTP server to the carrier gateway."""
 
     name = "gateway"
 
