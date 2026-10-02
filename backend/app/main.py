@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import Application, ApplicationStatus, ApplicationType, Document, Payment, PaymentStatus, Person
+from app.services.communication import send_application_notification
 
 RANGE_RULES_TEXT = """Kiowa Gun Club Range Rules
 
@@ -443,7 +444,25 @@ def submit_application(
     db.commit()
     db.refresh(application)
     db.refresh(person)
-    logger.info("application_submitted", extra={"person_id": person.id, "application_id": application.id, "type": application.application_type})
+    notification_channel = send_application_notification(
+        email=person.email,
+        applicant_name=f"{person.first_name} {person.last_name}",
+        phone=person.phone,
+        message=(
+            f"Hello {person.first_name},\n\n"
+            f"Your Kiowa Gun Club {application.application_type} application has been received and is pending review.\n\n"
+            "Thank you,\nKiowa Gun Club"
+        ),
+    )
+    logger.info(
+        "application_submitted",
+        extra={
+            "person_id": person.id,
+            "application_id": application.id,
+            "type": application.application_type,
+            "notification_channel": notification_channel,
+        },
+    )
 
     return {
         "message": f"Thank you, {person.first_name} {person.last_name}. Your application has been received and is pending review.",
