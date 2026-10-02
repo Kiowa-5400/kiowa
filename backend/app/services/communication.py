@@ -39,6 +39,19 @@ def _digits_only(phone: str) -> str:
     return re.sub(r"\D", "", phone or "")
 
 
+def _to_e164(phone: str) -> str | None:
+    raw = (phone or "").strip()
+    digits = _digits_only(raw)
+
+    if raw.startswith("+") and len(digits) >= 8:
+        return f"+{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+1{digits}"
+    return None
+
+
 def _gateway_map() -> dict[str, str]:
     settings = get_settings()
     try:
@@ -46,28 +59,40 @@ def _gateway_map() -> dict[str, str]:
     except json.JSONDecodeError:
         logger.error("invalid_sms_gateway_map")
         return {}
+
     if not isinstance(value, dict):
         return {}
+
     return {
-        str(key).strip().lower(): str(domain).strip()
-        for key, domain in value.items()
-        if str(key).strip() and str(domain).strip()
+        str(key).strip().lower(): str(value).strip()
+        for key, value in value.items()
+        if str(key).strip() and str(value).strip()
     }
 
 
 def _carrier_gateway(carrier: str | None) -> str | None:
+    """Resolve a Veriphone carrier name to the configured SMS gateway.
+
+    Veriphone returns carrier names as free text, so mappings are matched by
+    longest substring first. Gateway values may be either a domain
+    (example.com) or a template containing {number}/{phone}.
+    """
     if not carrier:
         return None
 
     carrier_key = carrier.strip().lower()
     mappings = _gateway_map()
 
-    # Prefer the longest configured key so entries such as "consumer cellular"
-    # win over broad carrier-name fragments.
     for key in sorted(mappings, key=len, reverse=True):
         if key in carrier_key:
             return mappings[key]
     return None
+
+
+def _gateway_address(phone_digits: str, gateway: str) -> str:
+    if "@" in gateway:
+        return gateway.format(number=phone_digits, phone=phone_digits)
+    return f"{phone_digits}@{gateway.format(number=phone_digits, phone=phone_digits)}"
 
 
 def _verify_phone_with_veriphone(phone: str) -> dict[str, Any]:
@@ -89,17 +114,16 @@ def _verify_phone_with_veriphone(phone: str) -> dict[str, Any]:
     payload = response.json()
 
     if payload.get("status") != "success":
-        raise RuntimeError(str(payload.get("message") or "Veriphone rejected the phone lookup."))
+        raise RuntimeError(
+            str(payload.get("message") or payload.get("error") or "Veriphone rejected the phone lookup.")
+        )
     if not payload.get("phone_valid"):
         raise RuntimeError(str(payload.get("reason") or "Phone number is not valid."))
+
     return payload
 
 
-def _send_email(
-    recipient: str,
-    subject: str,
-    body: str,
-) -> None:
+def _send_email(recipient: str, subject: str, body: str) -> None:
     settings = get_settings()
     if not settings.smtp_host or not settings.email_from:
         raise RuntimeError("SMTP_HOST and EMAIL_FROM must be configured.")
@@ -122,23 +146,18 @@ def _send_email(
         smtp.send_message(message)
 
 
-def _send_sms_gateway(
-    phone_digits: str,
-    gateway_domain: str,
-    subject: str,
-    body: str,
-) -> None:
+def _send_sms_gateway(phone_digits: str, gateway: str, subject: str, body: str) -> str:
     settings = get_settings()
-    gateway_address = gateway_domain.format(number=phone_digits, phone=phone_digits)
+    if not settings.smtp_host or not settings.email_from:
+        raise RuntimeError("SMTP_HOST and EMAIL_FROM must be configured.")
+
+    gateway_address = _gateway_address(phone_digits, gateway)
 
     message = EmailMessage()
     message["From"] = settings.email_from
     message["To"] = gateway_address
     message["Subject"] = subject
     message.set_content(body)
-
-    if not settings.smtp_host or not settings.email_from:
-        raise RuntimeError("SMTP_HOST and EMAIL_FROM must be configured.")
 
     with smtplib.SMTP(
         settings.smtp_host,
@@ -151,6 +170,8 @@ def _send_sms_gateway(
             smtp.login(settings.smtp_username, settings.smtp_password or "")
         smtp.send_message(message)
 
+    return gateway_address
+
 
 def send_application_notification(
     email: str,
@@ -158,17 +179,24 @@ def send_application_notification(
     phone: str | None = None,
     message: str | None = None,
 ) -> str:
-    """Notify an applicant by carrier email-to-SMS when possible, else email.
+    """Send an application notification by SMS gateway, falling back to email.
 
-    Veriphone is queried for the currently serving carrier. The gateway is
-    selected only from the deployment's explicit SMS_GATEWAY_MAP. Any missing
-    gateway, Veriphone failure, or SMTP gateway failure falls back to the
-    applicant's normal email address.
+    The routing sequence intentionally mirrors the legacy kiowa-gun behavior:
 
-    Note: SMTP success means the gateway accepted the email; it does not prove
-    downstream SMS delivery. Carrier gateways can silently filter or retire.
+    1. When the applicant clicks Send/Submit, normalize the phone number.
+    2. Ask Veriphone for the CURRENT serving carrier.
+    3. Use that carrier result to select the configured email-to-SMS gateway.
+    4. Send the notification through SMTP to the carrier gateway.
+    5. If validation, carrier routing, gateway delivery, or SMS SMTP fails,
+       send the same notification to the applicant's email address.
+
+    Veriphone Current mode is used because a number can be ported while keeping
+    the same phone number. The current carrier is therefore the useful routing
+    result, not only the originally assigned carrier.
+
+    SMTP success means the gateway accepted the email; it does not guarantee
+    that the downstream carrier ultimately delivered an SMS.
     """
-
     settings = get_settings()
     subject = settings.notification_subject
     body = message or (
@@ -185,35 +213,61 @@ def send_application_notification(
             logger.exception("application_notification_email_failed", extra={"email": email})
             return "failed"
 
-    phone_digits = _digits_only(phone)
-    if phone.strip().startswith("+"):\n        lookup_phone = phone\n    elif len(phone_digits) == 11 and phone_digits.startswith("1"):\n        lookup_phone = f"+{phone_digits}"\n    elif len(phone_digits) == 10:\n        lookup_phone = f"+1{phone_digits}"\n    else:\n        lookup_phone = phone
+    e164 = _to_e164(phone)
+    if not e164:
+        logger.info("application_notification_invalid_phone", extra={"phone_length": len(_digits_only(phone))})
+        try:
+            _send_email(email, subject, body)
+            return "email"
+        except Exception:
+            logger.exception("application_notification_email_failed", extra={"email": email})
+            return "failed"
 
     try:
-        verification = _verify_phone_with_veriphone(lookup_phone)
-        carrier = str(verification.get("current_carrier") or verification.get("carrier") or "").strip()
-        country_code = str(verification.get("country_code") or "").upper()
-        line_type = str(verification.get("current_line_type") or verification.get("phone_type") or "").lower()
-        gateway_domain = _carrier_gateway(carrier)
+        verification = _verify_phone_with_veriphone(e164)
 
-        if country_code == "US" and line_type in {"mobile", "fixed_line_or_mobile"} and gateway_domain:
-            if len(phone_digits) == 11 and phone_digits.startswith("1"):
-                phone_digits = phone_digits[1:]
-            if len(phone_digits) == 10:
-                gateway_address = gateway_domain.format(number=phone_digits, phone=phone_digits)
-                _send_sms_gateway(phone_digits, gateway_domain, subject, body)
-                logger.info(
-                    "application_notification_sms_sent",
-                    extra={"carrier": carrier, "gateway": gateway_address},
-                )
-                return "sms"
+        carrier = str(
+            verification.get("current_carrier")
+            or verification.get("carrier")
+            or ""
+        ).strip()
+        country_code = str(verification.get("country_code") or "").upper()
+        line_type = str(
+            verification.get("current_line_type")
+            or verification.get("phone_type")
+            or ""
+        ).lower()
+
+        gateway = _carrier_gateway(carrier)
+
+        if (
+            country_code == "US"
+            and line_type in {"mobile", "fixed_line_or_mobile"}
+            and gateway
+        ):
+            phone_digits = _digits_only(e164)
+            gateway_address = _send_sms_gateway(phone_digits[1:] if phone_digits.startswith("1") else phone_digits, gateway, subject, body)
+            logger.info(
+                "application_notification_sms_sent",
+                extra={
+                    "carrier": carrier,
+                    "line_type": line_type,
+                    "gateway": gateway_address,
+                    "ported": verification.get("ported"),
+                },
+            )
+            return "sms"
 
         reason = (
-            f"No configured email-to-SMS gateway for carrier '{carrier}', "
-            f"country '{country_code}', or unsupported line type '{line_type}'."
+            f"SMS unavailable for carrier '{carrier}', country '{country_code}', "
+            f"line type '{line_type}', gateway '{gateway}'."
         )
         logger.info("application_notification_sms_unavailable", extra={"reason": reason})
     except Exception as exc:
-        logger.warning("application_notification_sms_failed", extra={"error": str(exc)})
+        logger.warning(
+            "application_notification_sms_failed",
+            extra={"error": str(exc)},
+        )
 
     try:
         _send_email(email, subject, body)
