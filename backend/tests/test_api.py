@@ -17,6 +17,7 @@ os.environ.setdefault('EMAIL_FROM', 'noreply@example.com')
 
 from app.main import app
 import app.services.communication as communication
+import app.main as main_module
 
 client = TestClient(app)
 
@@ -234,7 +235,7 @@ def test_application_submission_sends_notification(monkeypatch) -> None:
     _register(email)
     token = _login(email)
     sent = []
-    monkeypatch.setattr(communication, 'send_application_notification', lambda **kwargs: sent.append(kwargs) or 'email')
+    monkeypatch.setattr(main_module, 'send_application_notification', lambda **kwargs: sent.append(kwargs) or 'email')
     response = client.post(
         '/api/application/submit',
         json={
@@ -247,3 +248,12 @@ def test_application_submission_sends_notification(monkeypatch) -> None:
     assert response.status_code == 200
     assert sent and sent[0]['email'] == email
     assert sent[0]['phone'] == '5551234567'
+def test_notification_falls_back_to_email_when_sms_lookup_or_gateway_fails(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(communication, '_verify_phone_with_veriphone', lambda phone: (_ for _ in ()).throw(RuntimeError('lookup unavailable')))
+    monkeypatch.setattr(communication, '_send_email', lambda recipient, subject, body: calls.append(recipient))
+    result = communication.send_application_notification(
+        email='member@example.com', applicant_name='Test Member', phone='5551234567', message='Test notification'
+    )
+    assert result == 'email'
+    assert calls == ['member@example.com']
