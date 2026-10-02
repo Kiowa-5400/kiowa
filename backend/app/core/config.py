@@ -14,7 +14,7 @@ def _default_database_url() -> str:
 
 class Settings(BaseModel):
     app_env: str = os.getenv("APP_ENV", "development")
-    app_secret: str = os.getenv("APP_SECRET", "change-me")
+    app_secret: str = os.getenv("APP_SECRET")
     secret_key: str = os.getenv("SECRET_KEY", os.getenv("APP_SECRET"))
     database_url: str = os.getenv("DATABASE_URL", _default_database_url())
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET")

@@ -26,7 +26,7 @@ function App() {
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/api/dashboard`);
+        const response = await fetch(`${apiBaseUrl}/api/board/dashboard`);
         if (!response.ok) {
           throw new Error('Unable to load dashboard.');
         }
