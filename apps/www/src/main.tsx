@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import clubLogo from '../assets/kiowa-gun.avif';
 import clubHeroImage from '../assets/kiowa-hero.avif';
 import './styles.css';
+import { AboutPage } from './pages/AboutPage';
+import { CalendarPage } from './pages/CalendarPage';
+import { ContactPage } from './pages/ContactPage';
+import { MatchesPage } from './pages/MatchesPage';
 
 function App() {
   const heroBackground = `linear-gradient(180deg, rgba(19, 29, 24, 0.18), rgba(19, 29, 24, 0.46)), url(${clubHeroImage})`;
@@ -22,7 +26,7 @@ function App() {
         </nav>
       </header>
 
-      <section className="hero">
+      {page ? <section className="content-page">{page}</section> : <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow light">Local. Safe. Welcoming.</p>
           <h2>Built for neighbors, families, and responsible shooters.</h2>
@@ -58,7 +62,7 @@ function App() {
         </div>
       </section>
 
-      <div className="info-strip" aria-label="Club quick facts">
+      {!page && <div className="info-strip" aria-label="Club quick facts">
         <span>Membership renewals</span>
         <span>Range events</span>
         <span>Responsible shooting</span>
