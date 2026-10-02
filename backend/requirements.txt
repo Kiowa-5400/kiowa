@@ -21,7 +21,6 @@ nh3==0.3.7
 
 # Integrations: Stripe, S3-compatible object storage, HTTP (Veriphone)
 stripe==16.0.0
-boto3==1.43.108
 httpx==0.28.1
 
 # Club timezone data and optional error monitoring
