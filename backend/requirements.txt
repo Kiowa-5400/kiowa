@@ -19,7 +19,7 @@ alembic==1.20.0
 argon2-cffi==25.1.0
 nh3==0.3.7
 
-# Integrations: Stripe, S3-compatible object storage, HTTP (Veriphone)
+# Integrations: Stripe, HTTP (Resend / Veriphone)
 stripe==16.0.0
 httpx==0.28.1
 
