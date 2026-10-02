@@ -44,7 +44,7 @@ Only `VITE_*` values are compiled into the browser apps. They hold public URLs o
 
 ## 3. Private preview, then launch
 
-`SITE_ACCESS=public` is configured for the production launch. Visitors see a "private preview" screen with a board sign-in link that returns them to the page they were on. When the club is ready to launch, set `SITE_ACCESS=public` on `kiowa-api` in the `kiowa-shared` environment group and redeploy it.
+`SITE_ACCESS=public` is configured for the production launch. If the club needs a private preview again, change the value to `board` in the `kiowa-shared` environment group and redeploy the API.
 
 The static files themselves (HTML/JS) are still downloadable during the preview. All club content, member data and every form come from the API, which is what the gate protects.
 
