@@ -1,4 +1,4 @@
-"""Dues payments: Stripe Checkout, webhook fulfillment, refunds, manual payments.
+"""Dues payments: Stripe Checkout, webhook fulfillment, refunds, manual payments.\n\nCheckout uses Stripe automatic payment methods so eligible popular payment methods and wallets can be offered without storing payment credentials.
 
 Board decision carried over from kiowa-gun (2026-08): dues are never
 auto-billed and cards are never stored. Every charge is a one-time hosted
@@ -144,6 +144,7 @@ def start_checkout(db: Session, application: Application, person: Person, contex
             "customer_email": person.email,
             "client_reference_id": str(payment.id),
             "submit_type": "pay",
+            "automatic_payment_methods": {"enabled": True},
             "line_items": [
                 {
                     "quantity": 1,
