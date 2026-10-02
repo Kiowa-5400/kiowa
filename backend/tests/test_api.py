@@ -12,8 +12,11 @@ os.environ['DATABASE_URL'] = f'sqlite:///{TEST_DB_PATH}'
 os.environ.setdefault('APP_SECRET', 'test-secret')
 os.environ.setdefault('CORS_ORIGINS', 'http://localhost:5173')
 os.environ.setdefault('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret')
+os.environ.setdefault('SMTP_HOST', 'smtp.example.com')
+os.environ.setdefault('EMAIL_FROM', 'noreply@example.com')
 
 from app.main import app
+import app.services.communication as communication
 
 client = TestClient(app)
 
@@ -225,3 +228,22 @@ def test_checkout_and_webhook_are_verified_and_idempotent() -> None:
     )
     assert replay.status_code == 200
     assert replay.json()['status'] == 'duplicate'
+
+def test_application_submission_sends_notification(monkeypatch) -> None:
+    email = f'notify-{uuid.uuid4().hex[:8]}@example.com'
+    _register(email)
+    token = _login(email)
+    sent = []
+    monkeypatch.setattr(communication, 'send_application_notification', lambda **kwargs: sent.append(kwargs) or 'email')
+    response = client.post(
+        '/api/application/submit',
+        json={
+            'phone': '5551234567', 'address': '1 Main', 'city': 'Great Bend',
+            'state': 'KS', 'zip_code': '67530', 'application_type': 'renew_membership',
+            'signature': 'Notify Tester', 'accept_rules': True, 'rules_acknowledged': True,
+        },
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert response.status_code == 200
+    assert sent and sent[0]['email'] == email
+    assert sent[0]['phone'] == '5551234567'
