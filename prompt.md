@@ -1463,3 +1463,77 @@ Never sacrifice required business functionality merely to keep the new code smal
 Never sacrifice the simplified architecture merely because the old application already contains an implementation.
 
 BUILD THE FINISHED PRODUCT IN geeko452100/kiowa.
+
+
+---
+
+# 44. Visual Design and Color Palette — kiowa-gun is the Reference
+
+The visual palette from kiowa-gun is preferred over the current kiowa palette.
+
+Use kiowa-gun's actual styling as the visual color reference while preserving kiowa's simpler layouts and architecture.
+
+The inspected kiowa-gun stylesheet uses a distinctive palette including:
+
+- deep near-black/charcoal: #0d0f0a
+- dark forest/olive green: #17250f, #1c2415, #2c3e1f
+- muted sage/green: #4c5e3a
+- warm off-white/cream: #f2f0ea
+- muted warm neutral: #cbc6b8
+- warm brown: #5c3a1e
+- brick/red accent: #a8291a
+- lighter red/coral states: #b8493c, #ffb4a8, #ff8a80
+- warm gold/yellow accent: #ffd166
+- pale gold states: #ffd9a3
+- light blue accent: #9fd3ff
+- pale green states: #9be89b, #8fd694
+- very light green background/state: #eafff0
+
+These values are references extracted from kiowa-gun's actual stylesheet, not a request to copy its CSS framework.
+
+## Required visual direction
+
+Use the kiowa-gun palette as the source of truth for primary/secondary backgrounds, cards, navigation, text, buttons, links, borders, focus states, success/warning/error states, badges, calendar categories, match categories, form controls, and dashboard cards.
+
+Create semantic CSS variables/tokens such as:
+
+- --color-bg
+- --color-surface
+- --color-surface-muted
+- --color-text
+- --color-text-muted
+- --color-primary
+- --color-primary-hover
+- --color-accent
+- --color-success
+- --color-warning
+- --color-danger
+- --color-border
+- --color-focus
+
+Do not scatter raw hex values throughout the React applications.
+
+## What to preserve from kiowa
+
+Do NOT copy the old kiowa-gun page structure or styling implementation wholesale.
+
+Keep kiowa's cleaner page layouts, responsive structure, simplified component organization, three-app architecture, and spacing/layout where already good.
+
+Change the visual treatment so that the finished product feels like the kiowa-gun brand.
+
+The intended result is:
+
+**kiowa's architecture and layout + kiowa-gun's functionality + kiowa-gun's color/visual identity.**
+
+## Visual QA requirement
+
+Before production:
+
+1. Compare all three apps against the kiowa-gun visual reference.
+2. Verify consistent palette usage across apps/www, apps/apply, and apps/board.
+3. Check surfaces, text contrast, buttons, links, form states, alerts, tables, cards, navigation, and mobile views.
+4. Do not introduce arbitrary new colors unless necessary for accessibility or a clearly defined semantic state.
+5. Preserve sufficient WCAG contrast while adapting the palette.
+6. Remove old one-off color values that conflict with the new palette where they are not required by functional state.
+
+The color palette migration is part of the production completion work, not an optional cosmetic task.
