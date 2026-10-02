@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     email_reply_to: str = ""
 
     # SMS
-    # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier's email-to-SMS gateway.
+    # SMS: "gateway" = Veriphone carrier lookup + the club mailbox SMTP to the carrier email-to-SMS gateway.
     sms_provider: Literal["gateway", "console", "disabled"] = "console"
     veriphone_api_key: str = ""
     sms_from_name: str = "Kiowa Gun Club"
