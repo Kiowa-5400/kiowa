@@ -6,9 +6,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+
 def _default_database_url() -> str:
     db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "kiowa.db"))
     return f"sqlite:///{db_path}"
+
 
 class Settings(BaseModel):
     app_env: str = os.getenv("APP_ENV", "development")
@@ -34,7 +36,13 @@ class Settings(BaseModel):
     smtp_timeout_seconds: float = float(os.getenv("SMTP_TIMEOUT_SECONDS", "10"))
     email_from: str | None = os.getenv("EMAIL_FROM")
     notification_subject: str = os.getenv("NOTIFICATION_SUBJECT", "Kiowa Gun Club application notification")
+
+    # JSON object mapping Veriphone carrier-name fragments to email-to-SMS
+    # gateway domains or address templates. Example:
+    # {"t-mobile": "tmomail.net", "verizon": "vtext.com"}
+    # Keep this configurable because carrier gateways can change.
     sms_gateway_map: str = os.getenv("SMS_GATEWAY_MAP", "{}")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
