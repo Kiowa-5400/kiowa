@@ -39,19 +39,11 @@ envVarGroups:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: EMAIL_PROVIDER
-        value: smtp
-      - key: SMTP_HOST
+        value: resend
+      - key: RESEND_API_KEY
         sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USERNAME
+      - key: RESEND_WEBHOOK_SECRET
         sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_USE_TLS
-        value: "true"
-      - key: SMTP_USE_SSL
-        value: "false"
       - key: EMAIL_FROM_ADDRESS
         sync: false
       - key: EMAIL_FROM_NAME
