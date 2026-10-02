@@ -1,17 +1,19 @@
 """Email delivery behind a provider interface.
 
 Business logic builds ``EmailMessage`` objects and calls ``get_email_provider()``;
-nothing outside this module knows which vendor is in use. SMTP is the
-production provider using the club mailbox; "console" logs messages
+nothing outside this module knows which vendor is in use. Resend is the
+production provider (same vendor kiowa-gun used); "console" logs messages
 and keeps them in memory for local development and tests.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import html
 import logging
-import smtplib
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
@@ -67,54 +69,75 @@ def _sender() -> str:
     return f"{settings.email_from_name} <{settings.email_from_address}>"
 
 
-class SmtpProvider:
-    """SMTP provider using the club's own mailbox credentials."""
+class ResendProvider:
+    name = "resend"
+    batch_size = 100  # Resend's per-request cap for /emails/batch
 
-    name = "smtp"
+    def __init__(self, api_key: str) -> None:
+        self._client = httpx.Client(
+            base_url="https://api.resend.com",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=httpx.Timeout(20.0),
+        )
 
-    def _message(self, message: EmailMessage):
-        from email.message import EmailMessage as MimeEmailMessage
+    def _payload(self, message: EmailMessage) -> dict[str, object]:
         settings = get_settings()
-        msg = MimeEmailMessage()
-        msg["From"] = message.from_override or _sender()
-        msg["To"] = message.to
-        msg["Subject"] = message.subject
-        if settings.email_reply_to:
-            msg["Reply-To"] = settings.email_reply_to
-        for key, value in message.headers.items():
-            msg[key] = value
-        text = message.text or html_to_text(message.html)
+        payload: dict[str, object] = {
+            "from": message.from_override or _sender(),
+            "to": [message.to],
+            "subject": message.subject,
+            "text": message.text or html_to_text(message.html),
+        }
+        # Carrier email-to-SMS gateways relay plain text only.
         if message.html:
-            msg.set_content(text)
-            msg.add_alternative(message.html, subtype="html")
-        else:
-            msg.set_content(text)
-        for attachment in message.attachments:
-            maintype, subtype = attachment.content_type.split("/", 1)
-            msg.add_attachment(attachment.content, maintype=maintype, subtype=subtype, filename=attachment.filename)
-        return msg
+            payload["html"] = message.html
+        if settings.email_reply_to:
+            payload["reply_to"] = settings.email_reply_to
+        if message.headers:
+            payload["headers"] = message.headers
+        if message.tags:
+            payload["tags"] = [{"name": k, "value": v} for k, v in message.tags.items()]
+        if message.attachments:
+            payload["attachments"] = [
+                {
+                    "filename": a.filename,
+                    "content": base64.b64encode(a.content).decode("ascii"),
+                    "content_type": a.content_type,
+                }
+                for a in message.attachments
+            ]
+        return payload
 
     def send(self, message: EmailMessage) -> SendResult:
-        settings = get_settings()
         try:
-            mime = self._message(message)
-            if settings.smtp_use_ssl:
-                with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-                    server.login(settings.smtp_username, settings.smtp_password)
-                    server.send_message(mime)
-            else:
-                with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-                    if settings.smtp_use_tls:
-                        server.starttls()
-                    server.login(settings.smtp_username, settings.smtp_password)
-                    server.send_message(mime)
-        except (OSError, smtplib.SMTPException) as exc:
-            logger.warning("smtp_send_failed", extra={"to": message.to, "error": str(exc)})
-            return SendResult(None, f"SMTP delivery failed: {exc}")
-        return SendResult(mime.get("Message-ID"))
+            response = self._client.post("/emails", json=self._payload(message))
+        except httpx.HTTPError as exc:
+            logger.warning("email_send_transport_error", extra={"error": str(exc)})
+            return SendResult(None, f"Email provider unreachable: {exc}")
+        if response.status_code >= 400:
+            return SendResult(None, f"Email provider error {response.status_code}: {response.text[:300]}")
+        return SendResult(response.json().get("id"))
 
     def send_batch(self, messages: list[EmailMessage]) -> list[SendResult]:
-        return [self.send(message) for message in messages]
+        # The batch endpoint doesn't support attachments; fall back to single sends.
+        if any(m.attachments for m in messages):
+            return [self.send(m) for m in messages]
+        results: list[SendResult] = []
+        for start in range(0, len(messages), self.batch_size):
+            chunk = messages[start : start + self.batch_size]
+            try:
+                response = self._client.post("/emails/batch", json=[self._payload(m) for m in chunk])
+            except httpx.HTTPError as exc:
+                results.extend(SendResult(None, f"Email provider unreachable: {exc}") for _ in chunk)
+                continue
+            if response.status_code >= 400:
+                error = f"Email provider error {response.status_code}: {response.text[:300]}"
+                results.extend(SendResult(None, error) for _ in chunk)
+                continue
+            data = response.json().get("data", [])
+            results.extend(SendResult(item.get("id")) for item in data)
+            results.extend(SendResult(None, "Provider returned no message id") for _ in range(len(chunk) - len(data)))
+        return results
 
 
 class ConsoleProvider:
@@ -152,11 +175,11 @@ class DisabledProvider:
 @lru_cache(maxsize=1)
 def get_email_provider() -> EmailProvider:
     settings = get_settings()
-    if settings.email_provider == "smtp":
-        if not (settings.smtp_host and settings.smtp_username and settings.smtp_password):
-            logger.error("email_provider_misconfigured", extra={"detail": "SMTP_HOST/SMTP_USERNAME/SMTP_PASSWORD missing"})
+    if settings.email_provider == "resend":
+        if not settings.resend_api_key:
+            logger.error("email_provider_misconfigured", extra={"detail": "RESEND_API_KEY missing"})
             return DisabledProvider()
-        return SmtpProvider()
+        return ResendProvider(settings.resend_api_key)
     if settings.email_provider == "console":
         return ConsoleProvider()
     return DisabledProvider()
@@ -204,3 +227,27 @@ def send_transactional(to: str, subject: str, body_html: str) -> SendResult:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Webhook verification (Resend signs webhooks with Svix)
+# ---------------------------------------------------------------------------
+
+
+def verify_svix_signature(secret: str, headers: dict[str, str], body: bytes, tolerance_seconds: int = 300) -> bool:
+    msg_id = headers.get("svix-id")
+    timestamp = headers.get("svix-timestamp")
+    signatures = headers.get("svix-signature")
+    if not (secret and msg_id and timestamp and signatures):
+        return False
+    try:
+        if abs(time.time() - int(timestamp)) > tolerance_seconds:
+            return False
+        key = base64.b64decode(secret.removeprefix("whsec_"))
+    except (ValueError, TypeError):
+        return False
+    signed = f"{msg_id}.{timestamp}.".encode() + body
+    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    for part in signatures.split():
+        version, _, sig = part.partition(",")
+        if version == "v1" and hmac.compare_digest(sig, expected):
+            return True
+    return False
