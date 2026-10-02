@@ -164,8 +164,7 @@ def create_app() -> FastAPI:
         events.board_router,
         communications.router,
         communications.public_router,
-        communications.webhook_router,
-        board_users.router,
+            board_users.router,
         dashboard.router,
     ):
         app.include_router(router)
