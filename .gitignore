@@ -8,3 +8,7 @@ node_modules/
 .DS_Store
 *.log
 *.md
+*.py[cod]
+*.pytest_cache/
+.vscode/
+.private_uploads/

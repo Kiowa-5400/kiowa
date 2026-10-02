@@ -18,7 +18,7 @@ function App() {
         <nav className="nav" aria-label="Main navigation">
           <a href="https://apply.kiowagunclub.org">Apply</a>
           <a href="https://board.kiowagunclub.org">Board</a>
-          <a href="https://kiowagunclub.org/rules">Rules</a>
+          <a href="https://www.kiowagunclub.org/rules">Rules</a>
         </nav>
       </header>
 

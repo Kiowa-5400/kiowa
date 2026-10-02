@@ -88,11 +88,12 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
     const loadFormDefinition = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/application/form');
+        const response = await fetch(`${apiBaseUrl}/api/application/form-definition`);
         if (!response.ok) {
           return;
         }
@@ -336,7 +337,7 @@ function App() {
                 </div>
                 <label className="file-picker">
                   {formState.documents[requirement.label] ? formState.documents[requirement.label] : 'Upload file'}
-                  <input type="file" onChange={(event) => handleDocumentUpload(event, requirement.label)} />
+                  <input type="file" accept="image/*,.pdf" capture="environment" onChange={(event) => handleDocumentUpload(event, requirement.label)} />
                 </label>
               </div>
             ))}
@@ -354,7 +355,7 @@ function App() {
               checked={formState.accept_rules}
               onChange={(event) => updateField('accept_rules', event.target.checked)}
             />
-            I acknowledge and agree to the range safety rules above.
+            I have read, understand, and agree to follow the Kiowa Gun Club Range Rules.
           </label>
         </section>
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -14,10 +15,17 @@ def _default_database_url() -> str:
 class Settings(BaseModel):
     app_env: str = os.getenv("APP_ENV", "development")
     app_secret: str = os.getenv("APP_SECRET", "change-me")
+    secret_key: str = os.getenv("SECRET_KEY", os.getenv("APP_SECRET", "change-me"))
     database_url: str = os.getenv("DATABASE_URL", _default_database_url())
+    stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret")
+    stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "sk_test_placeholder")
     cors_origins: list[str] = [
-        origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:4173,http://localhost:5173,http://localhost:4174").split(",") if origin.strip()
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:4173,http://localhost:5173,http://localhost:4174,http://127.0.0.1:4173,http://127.0.0.1:5173,http://127.0.0.1:4174").split(",")
+        if origin.strip()
     ]
+    upload_dir: str = os.getenv("UPLOAD_DIR", str(Path(__file__).resolve().parents[1] / ".private_uploads"))
+    max_upload_size_mb: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "5"))
 
 
 @lru_cache(maxsize=1)

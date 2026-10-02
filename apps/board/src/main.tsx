@@ -21,11 +21,12 @@ function App() {
   const [summary, setSummary] = useState<DashboardSummary>({ pending: 0, approved: 0, waiting_list: 0, total: 0 });
   const [applications, setApplications] = useState<Submission[]>([]);
   const [error, setError] = useState('');
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/board/dashboard');
+        const response = await fetch(`${apiBaseUrl}/api/dashboard`);
         if (!response.ok) {
           throw new Error('Unable to load dashboard.');
         }
