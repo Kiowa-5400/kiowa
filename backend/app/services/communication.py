@@ -186,7 +186,7 @@ def send_application_notification(
             return "failed"
 
     phone_digits = _digits_only(phone)
-    lookup_phone = phone if phone.strip().startswith("+") else f"+1{phone_digits}" if len(phone_digits) == 10 else phone
+    if phone.strip().startswith("+"):\n        lookup_phone = phone\n    elif len(phone_digits) == 11 and phone_digits.startswith("1"):\n        lookup_phone = f"+{phone_digits}"\n    elif len(phone_digits) == 10:\n        lookup_phone = f"+1{phone_digits}"\n    else:\n        lookup_phone = phone
 
     try:
         verification = _verify_phone_with_veriphone(lookup_phone)
