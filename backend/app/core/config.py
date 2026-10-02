@@ -55,19 +55,15 @@ class Settings(BaseSettings):
     max_upload_mb: int = 10
 
     # Email
-    email_provider: Literal["smtp", "console", "disabled"] = "console"
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_use_tls: bool = True
-    smtp_use_ssl: bool = False
+    email_provider: Literal["resend", "console", "disabled"] = "console"
+    resend_api_key: str = ""
+    resend_webhook_secret: str = ""
     email_from_address: str = "no-reply@kiowagunclub.org"
     email_from_name: str = "Kiowa Gun Club"
     email_reply_to: str = ""
 
     # SMS
-    # SMS: "gateway" = Veriphone carrier lookup + the club mailbox SMTP to the carrier email-to-SMS gateway.
+    # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
     sms_provider: Literal["gateway", "console", "disabled"] = "console"
     veriphone_api_key: str = ""
     sms_from_name: str = "Kiowa Gun Club"
@@ -123,11 +119,11 @@ class Settings(BaseSettings):
         if self.cookie_secure is False:
             problems.append("COOKIE_SECURE cannot be disabled in production")
         if self.email_provider == "console":
-            problems.append("EMAIL_PROVIDER must be 'smtp' (or 'disabled') in production")
+            problems.append("EMAIL_PROVIDER must be 'resend' (or 'disabled') in production")
         if self.sms_provider == "console":
             problems.append("SMS_PROVIDER must be 'gateway' (or 'disabled') in production")
-        if self.sms_provider == "gateway" and (not self.veriphone_api_key or self.email_provider != "smtp"):
-            problems.append("SMS_PROVIDER=gateway needs VERIPHONE_API_KEY and EMAIL_PROVIDER=smtp")
+        if self.sms_provider == "gateway" and (not self.veriphone_api_key or self.email_provider != "resend"):
+            problems.append("SMS_PROVIDER=gateway needs VERIPHONE_API_KEY and EMAIL_PROVIDER=resend")
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))
         return self
