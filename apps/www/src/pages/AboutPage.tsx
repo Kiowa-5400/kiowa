@@ -1,38 +1,37 @@
+import { usePageTitle } from '@shared/router';
+import { ErrorState, Loading } from '@shared/ui';
+import { CustomSections, PageIntro, SectionCard } from '../components/Sections';
+import { section, siteImage, usePage, useSite } from '../site';
+
 export function AboutPage() {
+  usePageTitle('About');
+  const { site } = useSite();
+  const page = usePage('about');
+  const photo = siteImage(site, 'about');
+
+  if (page.loading) return <Loading />;
+  if (page.error) return <ErrorState message={page.error} onRetry={page.reload} />;
+
   return (
     <>
-      <section className="page-hero">
-        <p className="eyebrow">Club information</p>
-        <h2>About Kiowa Gun Club</h2>
-        <p>Kiowa Gun Club is a membership-driven club serving the Great Bend, Kansas community with a focus on safe, responsible range use and organized shooting activities.</p>
-      </section>
-
-      <section className="content-grid">
+      <PageIntro section={section(page.data, 'intro')} kicker="Club information" />
+      <div className="grid-2">
+        <SectionCard section={section(page.data, 'club')} kicker="The club" />
+        <SectionCard section={section(page.data, 'activities')} kicker="Range activities" />
+      </div>
+      <div className="grid-2" style={{ marginTop: '1rem' }}>
+        <SectionCard section={section(page.data, 'officers')} kicker="Leadership" />
         <article className="card">
-          <p className="card-kicker">The club</p>
-          <h3>A community range in central Kansas</h3>
-          <p>Kiowa Gun Club is one of the oldest established clubs in the central Kansas region and is affiliated with the National Rifle Association. Club membership currently requires active NRA membership.</p>
-          <p>Membership dues are $150 annually, with the membership year running from August 1 through July 31. Prospective new members are also required to complete a background check and range orientation.</p>
+          <p className="kicker">Location</p>
+          <h2>Find the range</h2>
+          {site.physical_address && <p style={{ whiteSpace: 'pre-line' }}>{site.physical_address}</p>}
+          {site.map_url && <a className="btn" href={site.map_url} rel="noopener noreferrer">Get directions</a>}
         </article>
-
-        <article className="card">
-          <p className="card-kicker">Range activities</p>
-          <h3>More than a monthly match</h3>
-          <ul className="feature-list">
-            <li>Defensive pistol matches held on the second Saturday of the month during the scheduled season.</li>
-            <li>Member social shoots on the fourth Tuesday of each month at 6:00 PM.</li>
-            <li>Carbine and other organized shooting events as scheduled.</li>
-            <li>Open range use for members, subject to club rules and scheduled activities.</li>
-          </ul>
-        </article>
-      </section>
-
-      <section className="card wide-card">
-        <p className="card-kicker">Location</p>
-        <h3>Great Bend, Kansas</h3>
-        <p>Physical location: 369 SW 50 Ave, Great Bend, KS 67530.</p>
-        <a className="secondary-button" href="https://www.google.com/maps/search/?api=1&query=369+SW+50+Ave%2C+Great+Bend%2C+KS+67530" target="_blank" rel="noreferrer">Get directions</a>
-      </section>
+      </div>
+      {photo && site.images.about && (
+        <img className="page-photo" src={photo} alt={site.image_alt.about ?? 'Kiowa Gun Club'} />
+      )}
+      <CustomSections sections={page.data} />
     </>
   );
 }

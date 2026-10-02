@@ -7,8 +7,19 @@ node_modules/
 .env.*.local
 .DS_Store
 *.log
-*.md
 *.py[cod]
+__pycache__/
 *.pytest_cache/
+.ruff_cache/
 .vscode/
+
+# Working notes at the repository root (README.md and docs/ are kept).
+/*.md
+!/README.md
+
+# Local data that must never be committed: databases and uploaded files.
+*.db
+*.sqlite3
 .private_uploads/
+.storage/
+backend/.venv/

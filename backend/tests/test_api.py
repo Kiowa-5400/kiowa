@@ -1,227 +1,218 @@
-import os
-import uuid
-from pathlib import Path
+"""Authentication, sessions, CSRF, lockout, password reset, email verification, roles."""
 
-import httpx
-from fastapi.testclient import TestClient
+from __future__ import annotations
 
-TEST_DB_PATH = Path(__file__).resolve().parent / 'test_kiowa.db'
-if TEST_DB_PATH.exists():
-    TEST_DB_PATH.unlink()
-os.environ['DATABASE_URL'] = f'sqlite:///{TEST_DB_PATH}'
-os.environ.setdefault('APP_SECRET', 'test-secret')
-os.environ.setdefault('CORS_ORIGINS', 'http://localhost:5173')
-os.environ.setdefault('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret')
+from sqlalchemy import select
 
-from app.main import app
-
-client = TestClient(app)
+from app.models import AuditLog, Person
+from tests.conftest import email_outbox, last_token
+from tests.helpers import PASSWORD, board, board_sign_in, create_board_user, register_and_verify, sign_in
 
 
-def _register(email: str, password: str = 'Password123!', role: str = 'visitor') -> dict:
-    payload = {
-        'first_name': 'Test',
-        'last_name': 'User',
-        'email': email,
-        'password': password,
-        'phone': '5551234567',
-        'address': '123 Example St',
-        'city': 'Great Bend',
-        'state': 'KS',
-        'zip_code': '67530',
-        'role': role,
-    }
-    response = client.post('/api/auth/register', json=payload)
-    assert response.status_code == 200, response.text
-    return response.json()
+def test_health_and_readiness(api):
+    assert api.get("/health").json() == {"status": "ok"}
+    ready = api.get("/health/ready").json()
+    assert ready["status"] == "ok" and ready["migration"] == "0003"
 
 
-def _login(email: str, password: str = 'Password123!') -> str:
-    response = client.post('/api/auth/login', json={'email': email, 'password': password})
-    assert response.status_code == 200, response.text
-    return response.json()['token']
+def test_security_headers_and_request_id(api):
+    response = api.get("/health")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert "default-src 'none'" in response.headers["Content-Security-Policy"]
+    assert response.headers["X-Request-ID"]
 
 
-def test_health_check() -> None:
-    response = client.get('/health')
+def test_oversized_request_rejected_before_reading(api):
+    response = api.client.post("/api/auth/login", content=b"{}", headers={"content-length": str(200 * 1024 * 1024), "content-type": "application/json"})
+    assert response.status_code == 413
+
+
+def test_cors_allows_only_configured_origins(api):
+    allowed = api.client.options("/api/auth/session", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "GET"})
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    blocked = api.client.options("/api/auth/session", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in blocked.headers
+
+
+def test_registration_requires_email_verification(api):
+    response = api.post("/api/auth/register", json={"first_name": "Pat", "last_name": "Shooter", "email": "Pat@Example.com", "password": PASSWORD})
+    assert response.status_code == 202
+    blocked = api.post("/api/auth/login", json={"email": "pat@example.com", "password": PASSWORD})
+    assert blocked.status_code == 403 and "verify" in blocked.json()["detail"].lower()
+    token = last_token("pat@example.com", "/verify-email")
+    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 200
+    # One-time: the same link can't be reused.
+    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 400
+    session = sign_in(api, "pat@example.com")
+    assert session["profile"]["email"] == "pat@example.com"
+    assert session["profile"]["membership_status"] == "non_member"
+
+
+def test_registration_does_not_reveal_existing_accounts(api, db):
+    register_and_verify(api, "taken@example.com")
+    response = api.post("/api/auth/register", json={"first_name": "X", "last_name": "Y", "email": "taken@example.com", "password": "another-password-1"})
+    assert response.status_code == 202
+    # The existing password still works; the inbox owner got a reset link instead.
+    sign_in(api, "taken@example.com")
+    assert last_token("taken@example.com", "/reset-password")
+
+
+def test_existing_contact_claims_record_by_email_link(api, db):
+    db.add(Person(first_name="Old", last_name="Member", email="old@example.com", membership_status="member"))
+    db.commit()
+    api.post("/api/auth/register", json={"first_name": "Old", "last_name": "Member", "email": "old@example.com", "password": PASSWORD})
+    token = last_token("old@example.com", "/reset-password")
+    assert api.post("/api/auth/password/reset", json={"token": token, "password": "New-Password-123"}).status_code == 200
+    session = sign_in(api, "old@example.com", "New-Password-123")
+    assert session["profile"]["membership_status"] == "member"
+
+
+def test_weak_password_rejected(api):
+    response = api.post("/api/auth/register", json={"first_name": "A", "last_name": "B", "email": "a@example.com", "password": "short"})
+    assert response.status_code == 422
+    assert "password" in response.json()["errors"]
+
+
+def test_session_cookie_is_httponly_and_logout_invalidates(api):
+    register_and_verify(api, "cookie@example.com")
+    response = api.post("/api/auth/login", json={"email": "cookie@example.com", "password": PASSWORD})
+    cookie = response.headers["set-cookie"]
+    assert "kgc_member_session=" in cookie and "HttpOnly" in cookie and "samesite=lax" in cookie.lower()
+    stolen = api.client.cookies.get("kgc_member_session")
+    assert api.get("/api/auth/session").status_code == 200
+    assert api.post("/api/auth/logout").status_code == 200
+    assert api.get("/api/auth/session").status_code == 401
+    # The old cookie value is dead server-side, not just deleted in the browser.
+    api.client.cookies.set("kgc_member_session", stolen)
+    assert api.get("/api/auth/session").status_code == 401
+
+
+def test_csrf_header_required_for_state_changes(api):
+    register_and_verify(api, "csrf@example.com")
+    sign_in(api, "csrf@example.com")
+    good_csrf = api.csrf
+    api.csrf = None
+    assert api.patch("/api/me", json={"city": "Hoisington"}).status_code == 403
+    assert api.patch("/api/me", json={"city": "Hoisington"}, headers={"X-CSRF-Token": "wrong"}).status_code == 403
+    api.csrf = good_csrf
+    assert api.patch("/api/me", json={"city": "Hoisington"}).json()["city"] == "Hoisington"
+
+
+def test_lockout_after_repeated_failures(api, db):
+    register_and_verify(api, "lock@example.com")
+    for _ in range(8):
+        assert api.post("/api/auth/login", json={"email": "lock@example.com", "password": "wrong-password"}).status_code == 401
+    locked = api.post("/api/auth/login", json={"email": "lock@example.com", "password": PASSWORD})
+    assert locked.status_code == 429
+    person = db.scalar(select(Person).where(Person.email == "lock@example.com"))
+    assert person.locked_until is not None
+
+
+def test_login_rate_limit_per_ip(api):
+    for _ in range(10):
+        api.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever-123"})
+    assert api.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever-123"}).status_code == 429
+
+
+def test_password_reset_flow_revokes_sessions(api, new_api):
+    register_and_verify(api, "reset@example.com")
+    sign_in(api, "reset@example.com")
+    other = new_api()
+    other.post("/api/auth/password/forgot", json={"email": "reset@example.com"})
+    token = last_token("reset@example.com", "/reset-password")
+    assert other.post("/api/auth/password/reset", json={"token": token, "password": "Brand-New-Pass-1"}).status_code == 200
+    assert api.get("/api/auth/session").status_code == 401
+    assert other.post("/api/auth/password/reset", json={"token": token, "password": "Another-Pass-12"}).status_code == 400
+    sign_in(other, "reset@example.com", "Brand-New-Pass-1")
+
+
+def test_forgot_password_is_generic_for_unknown_email(api):
+    response = api.post("/api/auth/password/forgot", json={"email": "ghost@example.com"})
     assert response.status_code == 200
-    assert response.json()['status'] == 'ok'
+    assert not [m for m in email_outbox() if m.to == "ghost@example.com"]
 
 
-def test_application_form_includes_required_rules_and_document_logic() -> None:
-    response = client.get('/api/application/form')
-    assert response.status_code == 200
-    payload = response.json()
-
-    assert 'I have read, understand, and agree to follow the Kiowa Gun Club Range Rules.' in payload['rules_text']
-    assert any(rule['label'] == 'NRA Membership Proof' for rule in payload['document_requirements']['renew_membership'])
-    assert any(rule['label'] == 'Background Check OR Concealed Carry License' for rule in payload['document_requirements']['waiting_list'])
-
-
-def test_register_login_and_auth_me() -> None:
-    email = f'user-{uuid.uuid4().hex[:8]}@example.com'
-    _register(email)
-    token = _login(email)
-
-    me = client.get('/api/auth/me', headers={'Authorization': f'Bearer {token}'})
-    assert me.status_code == 200
-    assert me.json()['email'] == email
-
-    locked = client.get('/api/auth/me')
-    assert locked.status_code == 401
+def test_change_password_keeps_current_session(api):
+    register_and_verify(api, "change@example.com")
+    sign_in(api, "change@example.com")
+    bad = api.post("/api/auth/password/change", json={"current_password": "nope-nope-nope", "new_password": "Whatever-12345"})
+    assert bad.status_code == 400
+    ok = api.post("/api/auth/password/change", json={"current_password": PASSWORD, "new_password": "Whatever-12345"})
+    assert ok.status_code == 200
+    assert api.get("/api/auth/session").status_code == 200
 
 
-def test_user_cannot_access_other_users_application_or_documents() -> None:
-    user_a = f'userA-{uuid.uuid4().hex[:8]}@example.com'
-    user_b = f'userB-{uuid.uuid4().hex[:8]}@example.com'
-
-    _register(user_a)
-    _register(user_b)
-    token_a = _login(user_a)
-    token_b = _login(user_b)
-
-    app_payload = {
-        'application_type': 'renew_membership',
-        'signature': 'User B',
-        'accept_rules': True,
-        'notes': 'test',
-        'payment_status': 'pending',
-        'amount_due': 150.00,
-        'rules_version': '2026-10-01',
-        'rules_acknowledged': True,
-    }
-    created = client.post('/api/application/submit', json=app_payload, headers={'Authorization': f'Bearer {token_b}'})
-    assert created.status_code == 200
-    app_id = created.json()['application']['id']
-
-    bad_app = client.get(f'/api/applications/{app_id}', headers={'Authorization': f'Bearer {token_a}'})
-    assert bad_app.status_code == 403
-
-    upload = client.post(
-        '/api/documents/upload',
-        files={'file': ('proof.pdf', b'%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF', 'application/pdf')},
-        data={'application_id': str(app_id), 'document_type': 'NRA Membership Proof'},
-        headers={'Authorization': f'Bearer {token_b}'},
-    )
-    assert upload.status_code == 200
-    doc_id = upload.json()['document']['id']
-
-    bad_doc = client.get(f'/api/documents/{doc_id}/download', headers={'Authorization': f'Bearer {token_a}'})
-    assert bad_doc.status_code == 403
+def test_member_cannot_use_board_realm(api, new_api):
+    register_and_verify(api, "plain@example.com")
+    board_client = new_api()
+    assert board_client.post("/api/board/auth/login", json={"email": "plain@example.com", "password": PASSWORD}).status_code == 401
+    sign_in(api, "plain@example.com")
+    # A member session cookie does not authenticate board routes.
+    assert api.get("/api/board/dashboard").status_code == 401
 
 
-def test_board_routes_require_board_role() -> None:
-    applicant = f'applicant-{uuid.uuid4().hex[:8]}@example.com'
-    board = f'board-{uuid.uuid4().hex[:8]}@example.com'
-    _register(applicant)
-    _register(board, role='board')
+def test_board_login_and_permissions_by_role(api, new_api, db):
+    session = board(api, db, "treasurer@example.com", "treasurer")
+    assert session["role"] == "treasurer" and "payments.view" in session["permissions"]
+    assert "board.manage" not in session["permissions"]
+    assert api.get("/api/board/payments").status_code == 200
+    assert api.get("/api/board/users").status_code == 403
 
-    applicant_token = _login(applicant)
-    board_token = _login(board)
+    member_board = new_api()
+    board(member_board, db, "bm@example.com", "board_member")
+    assert member_board.get("/api/board/payments").status_code == 403
+    assert member_board.get("/api/board/exports/contacts.csv").status_code == 403
+    assert member_board.get("/api/board/audit").status_code == 403
+    assert member_board.get("/api/board/applications").status_code == 200
 
-    unauthorized = client.get('/api/board/applications', headers={'Authorization': f'Bearer {applicant_token}'})
-    assert unauthorized.status_code == 403
-
-    allowed = client.get('/api/board/applications', headers={'Authorization': f'Bearer {board_token}'})
-    assert allowed.status_code == 200
-
-
-def test_document_upload_requires_auth_and_valid_files() -> None:
-    email = f'upload-{uuid.uuid4().hex[:8]}@example.com'
-    _register(email)
-    token = _login(email)
-
-    submit = client.post(
-        '/api/application/submit',
-        json={
-            'first_name': 'Upload',
-            'last_name': 'Tester',
-            'email': email,
-            'phone': '5551234567',
-            'address': '1 Main',
-            'city': 'Great Bend',
-            'state': 'KS',
-            'zip_code': '67530',
-            'application_type': 'renew_membership',
-            'signature': 'Upload Tester',
-            'accept_rules': True,
-            'rules_version': '2026-10-01',
-            'rules_acknowledged': True,
-        },
-        headers={'Authorization': f'Bearer {token}'},
-    )
-    assert submit.status_code == 200
-    application_id = submit.json()['application']['id']
-
-    good = client.post(
-        '/api/documents/upload',
-        files={'file': ('proof.pdf', b'%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF', 'application/pdf')},
-        data={'application_id': str(application_id), 'document_type': 'NRA Membership Proof'},
-        headers={'Authorization': f'Bearer {token}'},
-    )
-    assert good.status_code == 200
-
-    bad_type = client.post(
-        '/api/documents/upload',
-        files={'file': ('bad.txt', b'not a pdf', 'text/plain')},
-        data={'application_id': str(application_id), 'document_type': 'NRA Membership Proof'},
-        headers={'Authorization': f'Bearer {token}'},
-    )
-    assert bad_type.status_code == 400
+    assert db.scalar(select(AuditLog).where(AuditLog.action == "board.signed_in")) is not None
 
 
-def test_checkout_and_webhook_are_verified_and_idempotent() -> None:
-    email = f'pay-{uuid.uuid4().hex[:8]}@example.com'
-    _register(email)
-    token = _login(email)
-    app_response = client.post(
-        '/api/application/submit',
-        json={
-            'first_name': 'Pay',
-            'last_name': 'Tester',
-            'email': email,
-            'phone': '5551234567',
-            'address': '1 Main',
-            'city': 'Great Bend',
-            'state': 'KS',
-            'zip_code': '67530',
-            'application_type': 'renew_membership',
-            'signature': 'Pay Tester',
-            'accept_rules': True,
-            'rules_version': '2026-10-01',
-            'rules_acknowledged': True,
-        },
-        headers={'Authorization': f'Bearer {token}'},
-    )
-    app_id = app_response.json()['application']['id']
+def test_board_invite_accept_and_deactivate(api, new_api, db):
+    board(api, db)
+    invite = api.post("/api/board/users", json={"first_name": "Vera", "last_name": "Vice", "email": "vp@example.com", "role": "vice_president", "position": "Vice President"})
+    assert invite.status_code == 201, invite.text
+    token = last_token("vp@example.com", "/accept-invite")
+    vp = new_api()
+    assert vp.post("/api/board/auth/password/reset", json={"token": token, "password": "Vice-Pres-Pass-1"}).status_code == 200
+    assert board_sign_in(vp, "vp@example.com", "Vice-Pres-Pass-1")["role"] == "vice_president"
+    # The invited board member is also on the contact list as a member.
+    assert db.scalar(select(Person).where(Person.email == "vp@example.com")).on_board
 
-    checkout = client.post('/api/payments/checkout', json={'application_id': app_id}, headers={'Authorization': f'Bearer {token}'})
-    assert checkout.status_code == 200
-    payload = checkout.json()
-    assert payload['application_id'] == app_id
-    assert payload['expected_amount'] == 150.0
+    board_user_id = invite.json()["id"]
+    assert api.patch(f"/api/board/users/{board_user_id}", json={"is_active": False}).status_code == 200
+    assert vp.get("/api/board/dashboard").status_code == 401
 
-    event = {
-        'id': 'evt_test_123',
-        'type': 'checkout.session.completed',
-        'data': {'object': {'id': 'cs_test_123', 'amount_total': 15000, 'currency': 'usd', 'metadata': {'application_id': str(app_id), 'person_id': '1'}}},
-    }
-    body = b'{"id":"evt_test_123","type":"checkout.session.completed","data":{"object":{"id":"cs_test_123","amount_total":15000,"currency":"usd","metadata":{"application_id":"' + str(app_id).encode() + b'","person_id":"1"}}}}'
-    signed = httpx.Client().build_request('POST', 'http://localhost', content=body).headers
-    sig = 't=' + str(int(__import__('time').time())) + ',v1=' + __import__('hashlib').sha256(b'whsec_test_secret' + b'evt_test_123').hexdigest()
 
-    webhook = client.post(
-        '/api/payments/webhook',
-        content=body,
-        headers={'Stripe-Signature': sig, 'Content-Type': 'application/json'},
-    )
-    assert webhook.status_code == 200
-    assert webhook.json()['status'] == 'succeeded'
+def test_board_role_hierarchy(api, db):
+    board(api, db, "pres@example.com", "president")
+    tech = create_board_user(db, "tech@example.com", "tech_admin")
+    response = api.post("/api/board/users", json={"first_name": "T", "last_name": "A", "email": "t2@example.com", "role": "tech_admin"})
+    assert response.status_code == 403
+    assert api.patch(f"/api/board/users/{tech.board_user.id}", json={"role": "board_member"}).status_code == 403
 
-    replay = client.post(
-        '/api/payments/webhook',
-        content=body,
-        headers={'Stripe-Signature': sig, 'Content-Type': 'application/json'},
-    )
-    assert replay.status_code == 200
-    assert replay.json()['status'] == 'duplicate'
+
+def test_last_president_cannot_be_removed(api, db):
+    board(api, db, "only-pres@example.com", "president")
+    me = api.get("/api/board/users").json()[0]
+    response = api.patch(f"/api/board/users/{me['id']}", json={"role": "board_member"})
+    assert response.status_code == 409
+
+
+def test_site_access_board_gate(api, new_api, db, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "site_access", "board")
+    visitor = new_api()
+    locked = visitor.get("/api/public/site")
+    assert locked.status_code == 401 and locked.json()["code"] == "preview_locked"
+    assert visitor.post("/api/auth/register", json={"first_name": "A", "last_name": "B", "email": "x@example.com", "password": PASSWORD}).status_code == 401
+    assert visitor.get("/api/site-access").json()["authorized"] is False
+    # Board login, health and webhooks stay reachable.
+    assert visitor.get("/health").status_code == 200
+    board(api, db)
+    assert api.get("/api/site-access").json()["authorized"] is True
+    assert api.get("/api/public/site").status_code == 200
+    monkeypatch.setattr(get_settings(), "site_access", "public")
+    assert visitor.get("/api/public/site").status_code == 200

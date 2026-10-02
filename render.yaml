@@ -1,0 +1,195 @@
+# Render Blueprint for the Kiowa Gun Club.
+#
+# Domains assumed below (set them in each service's Custom Domains):
+#   kiowagunclub.org        -> kiowa-www      (public site)
+#   apply.kiowagunclub.org  -> kiowa-apply    (member portal + applications)
+#   board.kiowagunclub.org  -> kiowa-board    (board administration)
+#   api.kiowagunclub.org    -> kiowa-api      (FastAPI)
+# All four must share one parent domain so the API's session cookies are
+# same-site for the three apps. See docs/DEPLOYMENT.md.
+
+envVarGroups:
+  - name: kiowa-shared
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://kiowagunclub.org,https://www.kiowagunclub.org,https://apply.kiowagunclub.org,https://board.kiowagunclub.org
+      - key: PUBLIC_SITE_URL
+        value: https://kiowagunclub.org
+      - key: APPLY_APP_URL
+        value: https://apply.kiowagunclub.org
+      - key: BOARD_APP_URL
+        value: https://board.kiowagunclub.org
+      - key: API_PUBLIC_URL
+        value: https://api.kiowagunclub.org
+      # "board" keeps the site in private preview (board sign-in required). Change to "public" at launch.
+      - key: SITE_ACCESS
+        value: board
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: Kiowa Gun Club
+      - key: EMAIL_REPLY_TO
+        sync: false
+      - key: SMS_PROVIDER
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: SENTRY_DSN
+        sync: false
+
+databases:
+  - name: kiowa-db
+    databaseName: kiowa_gun_club
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: kiowa-api
+    runtime: python
+    rootDir: backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # Runs before each deploy goes live; a failed migration stops the deploy.
+    preDeployCommand: alembic upgrade head && python -m app.cli bootstrap-admin
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2 --proxy-headers --forwarded-allow-ips '*' --no-server-header
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: kiowa-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kiowa-db
+          property: connectionString
+      # First deploy only: create the initial administrator, then delete these.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+
+  # Daily renewal reminders, NRA expiration check, annual termination sweep,
+  # Stripe reconciliation and session cleanup. 13:00 UTC = 8 AM CDT / 7 AM CST.
+  - type: cron
+    name: kiowa-daily-jobs
+    runtime: python
+    rootDir: backend
+    schedule: "0 13 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs daily
+    envVars:
+      - fromGroup: kiowa-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kiowa-db
+          property: connectionString
+
+  - type: web
+    name: kiowa-www
+    runtime: static
+    buildCommand: cd apps/www && npm ci && npm run build
+    staticPublishPath: apps/www/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22.20.0"
+      - key: VITE_API_BASE_URL
+        value: https://api.kiowagunclub.org
+      - key: VITE_APPLY_APP_URL
+        value: https://apply.kiowagunclub.org
+      - key: VITE_BOARD_APP_URL
+        value: https://board.kiowagunclub.org
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers: &static-headers
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://api.kiowagunclub.org; connect-src 'self' https://api.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  - type: web
+    name: kiowa-apply
+    runtime: static
+    buildCommand: cd apps/apply && npm ci && npm run build
+    staticPublishPath: apps/apply/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22.20.0"
+      - key: VITE_API_BASE_URL
+        value: https://api.kiowagunclub.org
+      - key: VITE_WWW_URL
+        value: https://kiowagunclub.org
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers: *static-headers
+
+  - type: web
+    name: kiowa-board
+    runtime: static
+    buildCommand: cd apps/board && npm ci && npm run build
+    staticPublishPath: apps/board/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22.20.0"
+      - key: VITE_API_BASE_URL
+        value: https://api.kiowagunclub.org
+      - key: VITE_WWW_URL
+        value: https://kiowagunclub.org
+      - key: VITE_APPLY_APP_URL
+        value: https://apply.kiowagunclub.org
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers: *static-headers
