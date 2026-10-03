@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
+from stripe.params.checkout import SessionCreateParams
 
 from app.core.security import hash_password
 from app.core.timeutil import now_utc
@@ -102,6 +103,9 @@ class FakeGateway(payment_service.StripeGateway):
         self.refunds: list[tuple[str, int]] = []
 
     def create_checkout_session(self, params: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        # Stripe rejects unknown parameters, so the fake does too.
+        unknown = set(params) - (SessionCreateParams.__required_keys__ | SessionCreateParams.__optional_keys__)
+        assert not unknown, f"Not a Checkout Session parameter: {sorted(unknown)}"
         session_id = f"cs_test_{len(self.sessions) + 1}"
         session = {"id": session_id, "url": f"https://checkout.stripe.com/c/pay/{session_id}", "params": params,
                    "amount_total": params["line_items"][0]["price_data"]["unit_amount"], "currency": "usd",

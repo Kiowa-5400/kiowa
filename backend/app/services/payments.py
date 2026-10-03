@@ -144,7 +144,7 @@ def start_checkout(db: Session, application: Application, person: Person, contex
             "customer_email": person.email,
             "client_reference_id": str(payment.id),
             "submit_type": "pay",
-            "automatic_payment_methods": {"enabled": True},
+            # No payment_method_types: Checkout offers the methods enabled in the Stripe Dashboard.
             "line_items": [
                 {
                     "quantity": 1,
