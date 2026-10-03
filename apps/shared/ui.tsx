@@ -11,7 +11,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
-import { api, errorMessage, type SiteAccess } from './api';
+import { errorMessage } from './api';
 
 // ---------------------------------------------------------------- data ----
 
@@ -219,27 +219,3 @@ export function Modal({ open, title, onClose, children }: { open: boolean; title
   );
 }
 
-// ------------------------------------------------------- preview gate ----
-
-/**
- * While the API runs with SITE_ACCESS=board (pre-launch preview), visitors
- * without a board session see a sign-in prompt instead of the site.
- */
-export function PreviewGate({ children, siteName = 'Kiowa Gun Club' }: { children: ReactNode; siteName?: string }) {
-  const access = useAsync<SiteAccess>((signal) => api<SiteAccess>('/api/site-access', { signal, quiet401: true }), []);
-  if (access.loading) return <Loading />;
-  if (access.data && !access.data.authorized) {
-    const next = encodeURIComponent(window.location.href);
-    return (
-      <main id="main" className="gate">
-        <div className="card stack">
-          <p className="kicker">Private preview</p>
-          <h1>{siteName}</h1>
-          <p>This site isn't open to the public yet. Board members can sign in to preview it.</p>
-          <a className="btn btn-primary" href={`${access.data.board_login_url}?next=${next}`}>Sign in with a board account</a>
-        </div>
-      </main>
-    );
-  }
-  return <>{children}</>;
-}

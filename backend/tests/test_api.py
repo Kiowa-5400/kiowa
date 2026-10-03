@@ -198,21 +198,3 @@ def test_last_president_cannot_be_removed(api, db):
     me = api.get("/api/board/users").json()[0]
     response = api.patch(f"/api/board/users/{me['id']}", json={"role": "board_member"})
     assert response.status_code == 409
-
-
-def test_site_access_board_gate(api, new_api, db, monkeypatch):
-    from app.core.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "site_access", "board")
-    visitor = new_api()
-    locked = visitor.get("/api/public/site")
-    assert locked.status_code == 401 and locked.json()["code"] == "preview_locked"
-    assert visitor.post("/api/auth/register", json={"first_name": "A", "last_name": "B", "email": "x@example.com", "password": PASSWORD}).status_code == 401
-    assert visitor.get("/api/site-access").json()["authorized"] is False
-    # Board login, health and webhooks stay reachable.
-    assert visitor.get("/health").status_code == 200
-    board(api, db)
-    assert api.get("/api/site-access").json()["authorized"] is True
-    assert api.get("/api/public/site").status_code == 200
-    monkeypatch.setattr(get_settings(), "site_access", "public")
-    assert visitor.get("/api/public/site").status_code == 200

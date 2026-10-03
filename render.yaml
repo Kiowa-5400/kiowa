@@ -27,9 +27,6 @@ envVarGroups:
         value: https://board.kiowagunclub.org
       - key: API_PUBLIC_URL
         value: https://api.kiowagunclub.org
-      # Public production launch.
-      - key: SITE_ACCESS
-        value: public
       - key: STORAGE_BACKEND
         value: local
       - key: LOCAL_STORAGE_DIR

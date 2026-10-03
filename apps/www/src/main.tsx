@@ -2,16 +2,13 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import '@shared/tokens.css';
 import './styles.css';
-import { PreviewGate } from '@shared/ui';
 import { App } from './App';
 import { SiteProvider } from './site';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <PreviewGate>
-      <SiteProvider>
-        <App />
-      </SiteProvider>
-    </PreviewGate>
+    <SiteProvider>
+      <App />
+    </SiteProvider>
   </React.StrictMode>,
 );
