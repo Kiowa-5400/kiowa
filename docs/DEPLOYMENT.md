@@ -10,11 +10,11 @@ The API, database and daily jobs run on Render, described in [`render.yaml`](../
 
 ## 1. Before the first deploy
 
-1. **Domains.** The API sets its session cookies itself, so the five sites must share one parent domain: `kiowagunclub.org` (www), `portal.kiowagunclub.org` (member sign-in and account), `apply.kiowagunclub.org` (application form), `board.kiowagunclub.org`, `api.kiowagunclub.org`.
+1. **Domains.** The API sets its session cookies itself, so the five sites must share one parent domain: `kiowagunclub.org` (www), `portal.kiowagunclub.org` (member sign-in and account), `apply.kiowagunclub.org` (application form), `board.kiowagunclub.org`, `app.kiowagunclub.org`.
 2. **Render storage.** The production API uses the paid Render persistent disk mounted at `/var/data/kiowa-storage`. Keep the API at one instance; the disk is attached to that instance.
-3. **Stripe.** In the Stripe Dashboard, add `https://api.kiowagunclub.org/api/webhooks/stripe` for the configured checkout events and copy the signing secret/API key.
-4. **Email (Resend).** Verify `kiowagunclub.org` as a sending domain in Resend, create an API key, and add a webhook to `https://api.kiowagunclub.org/api/webhooks/email/resend` for delivered, opened, clicked, bounced and complained events. Copy its signing secret.
-5. **Texts (Twilio).** Create a Twilio Messaging Service, add the club's Twilio sender/phone number, complete the required U.S. messaging registration, and copy the Account SID, Auth Token and Messaging Service SID. Kiowa sends SMS/MMS through the Messaging Service and posts each message's delivery-status callback to `https://api.kiowagunclub.org/api/webhooks/sms/twilio`.
+3. **Stripe.** In the Stripe Dashboard, add `https://app.kiowagunclub.org/api/webhooks/stripe` for the configured checkout events and copy the signing secret/API key.
+4. **Email (Resend).** Verify `kiowagunclub.org` as a sending domain in Resend, create an API key, and add a webhook to `https://app.kiowagunclub.org/api/webhooks/email/resend` for delivered, opened, clicked, bounced and complained events. Copy its signing secret.
+5. **Texts (Twilio).** Create a Twilio Messaging Service, add the club's Twilio sender/phone number, complete the required U.S. messaging registration, and copy the Account SID, Auth Token and Messaging Service SID. Kiowa sends SMS/MMS through the Messaging Service and posts each message's delivery-status callback to `https://app.kiowagunclub.org/api/webhooks/sms/twilio`.
 
 ## 2. Create the Render Blueprint
 
@@ -47,7 +47,7 @@ The API refuses to start in production without PostgreSQL, a strong `SECRET_KEY`
 | `reconcile-payments` | Asks Stripe about checkouts still pending after 30 minutes, in case a webhook was missed | Yes |
 | `purge-sessions` | Deletes expired sessions | Yes |
 
-Run one by hand from the `kiowa-daily-jobs` or `kiowa-api` shell: `python -m app.jobs renewal-reminders`. You can also trigger jobs over HTTP: `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://api.kiowagunclub.org/api/jobs/daily`.
+Run one by hand from the `kiowa-daily-jobs` or `kiowa-api` shell: `python -m app.jobs renewal-reminders`. You can also trigger jobs over HTTP: `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://app.kiowagunclub.org/api/jobs/daily`.
 
 ## 4. Cloudflare Pages
 
@@ -63,7 +63,7 @@ Each app is its own Pages project connected to this repository:
 For every project:
 
 - **Build command** `npm ci && npm run build`, **output directory** `dist`. Pages clones the whole repository, so `apps/shared` is available to the build.
-- **Environment variables** are the production URLs: `VITE_API_BASE_URL=https://api.kiowagunclub.org`, `VITE_WWW_URL=https://kiowagunclub.org`, `VITE_PORTAL_APP_URL=https://portal.kiowagunclub.org`, `VITE_APPLY_APP_URL=https://apply.kiowagunclub.org`, `VITE_BOARD_APP_URL=https://board.kiowagunclub.org`. Vite builds them into the bundle; a missing one falls back to `localhost`. Changing one needs a redeploy.
+- **Environment variables** are the production URLs: `VITE_API_BASE_URL=https://app.kiowagunclub.org`, `VITE_WWW_URL=https://kiowagunclub.org`, `VITE_PORTAL_APP_URL=https://portal.kiowagunclub.org`, `VITE_APPLY_APP_URL=https://apply.kiowagunclub.org`, `VITE_BOARD_APP_URL=https://board.kiowagunclub.org`. Vite builds them into the bundle; a missing one falls back to `localhost`. Changing one needs a redeploy.
 - **Node version** comes from each app's `.node-version` (Vite 8 needs 22.12+).
 - **Security headers** (CSP, HSTS, etc.) and long-lived caching for `/assets/*` come from each app's `public/_headers`. If the API domain changes, update the CSP there.
 - **SPA routing** needs no configuration: with no `404.html`, Pages serves `index.html` for unknown paths.

@@ -6,7 +6,7 @@
 #   portal.kiowagunclub.org -> Pages: apps/portal  (member sign-in, account, status, payment)
 #   apply.kiowagunclub.org  -> Pages: apps/apply   (membership application form)
 #   board.kiowagunclub.org  -> Pages: apps/board   (board administration)
-#   api.kiowagunclub.org    -> Render: kiowa-api   (FastAPI)
+#   app.kiowagunclub.org    -> Render: kiowa-api   (FastAPI)
 # All five must share one parent domain so the API's session cookies are
 # same-site for the four apps.
 
@@ -30,7 +30,7 @@ envVarGroups:
       - key: BOARD_APP_URL
         value: https://board.kiowagunclub.org
       - key: API_PUBLIC_URL
-        value: https://api.kiowagunclub.org
+        value: https://app.kiowagunclub.org
       - key: STORAGE_BACKEND
         value: local
       - key: LOCAL_STORAGE_DIR
