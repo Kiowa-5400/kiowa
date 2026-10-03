@@ -1,14 +1,8 @@
-"""Text messages through each carrier's email-to-SMS gateway, plus consent enforcement.
+"""Text messages through Twilio Programmable Messaging with consent enforcement.
 
-Ported from kiowa-gun (lib/sms.ts, lib/veriphone.ts): the member's carrier is
-looked up once with Veriphone (https://veriphone.io) and cached on their
-record, then the text is emailed as plain text to
-<10-digit number>@<carrier gateway domain> through the email provider
-(Resend). This avoids A2P 10DLC registration, at the cost of no delivery
-receipts and no picture messages.
-
-The carrier lookup and gateway transport sit behind ``SmsProvider`` so a
-dedicated SMS API could replace them without touching business logic.
+The production provider uses a Twilio Messaging Service for SMS/MMS delivery.
+Delivery status is finalized by Twilio status callbacks. Veriphone remains
+available only for the legacy carrier-gateway fallback.
 
 Consent rule: nothing in this module sends to a person who hasn't opted in.
 """
@@ -116,37 +110,35 @@ class SmsProvider(Protocol):
     def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult: ...
 
 
-class TelnyxSmsProvider:
-    """Telnyx Messaging API provider. Delivery is finalized by the Telnyx webhook."""
-    name = "telnyx"
+class TwilioSmsProvider:
+    """Twilio Programmable Messaging provider; delivery is finalized by webhook."""
+
+    name = "twilio"
 
     def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         number = to_e164(person.phone)
         if not number:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
         settings = get_settings()
-        payload: dict[str, object] = {"from": settings.telnyx_from_number, "to": number, "text": body}
-        if settings.telnyx_messaging_profile_id:
-            payload["messaging_profile_id"] = settings.telnyx_messaging_profile_id
-        if media_url:
-            payload["media_urls"] = [media_url]
+        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
+            return SmsResult("failed", "Twilio messaging is not configured.")
+
         try:
-            response = httpx.post(
-                "https://api.telnyx.com/v2/messages",
-                headers={"Authorization": f"Bearer {settings.telnyx_api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=20,
-            )
-        except httpx.HTTPError as exc:
-            return SmsResult("failed", f"Telnyx request failed: {exc}")
-        if response.status_code >= 400:
-            try:
-                detail = response.json().get("errors") or response.text
-            except ValueError:
-                detail = response.text
-            return SmsResult("failed", f"Telnyx rejected message ({response.status_code}): {detail}")
-        data = response.json().get("data") or {}
-        return SmsResult("sent", None, None, data.get("id"))
+            from twilio.rest import Client
+
+            kwargs: dict[str, object] = {
+                "body": body,
+                "to": number,
+                "messaging_service_sid": settings.twilio_messaging_service_sid,
+                "status_callback": f"{settings.api_public_url.rstrip('/')}/api/webhooks/sms/twilio",
+            }
+            if media_url:
+                kwargs["media_url"] = [media_url]
+            message = Client(settings.twilio_account_sid, settings.twilio_auth_token).messages.create(**kwargs)
+        except Exception as exc:
+            logger.exception("twilio_send_failed")
+            return SmsResult("failed", f"Twilio request failed: {exc}")
+        return SmsResult("sent", None, None, message.sid)
 
 
 class GatewaySmsProvider:
@@ -199,11 +191,11 @@ class DisabledSmsProvider:
 @lru_cache(maxsize=1)
 def get_sms_provider() -> SmsProvider:
     settings = get_settings()
-    if settings.sms_provider == "telnyx":
-        if not settings.telnyx_api_key or not settings.telnyx_from_number:
-            logger.error("sms_provider_misconfigured", extra={"detail": "TELNYX_API_KEY/TELNYX_FROM_NUMBER missing"})
+    if settings.sms_provider == "twilio":
+        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
+            logger.error("sms_provider_misconfigured", extra={"detail": "Twilio credentials or Messaging Service SID missing"})
             return DisabledSmsProvider()
-        return TelnyxSmsProvider()
+        return TwilioSmsProvider()
     if settings.sms_provider == "gateway":
         if not settings.veriphone_api_key:
             logger.error("sms_provider_misconfigured", extra={"detail": "VERIPHONE_API_KEY missing"})
