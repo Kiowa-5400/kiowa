@@ -12,7 +12,7 @@ from tests.helpers import PASSWORD, board, board_sign_in, create_board_user, reg
 def test_health_and_readiness(api):
     assert api.get("/health").json() == {"status": "ok"}
     ready = api.get("/health/ready").json()
-    assert ready["status"] == "ok" and ready["migration"] == "0003"
+    assert ready["status"] == "ok" and ready["migration"] == "0004"
 
 
 def test_security_headers_and_request_id(api):
