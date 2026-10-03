@@ -248,6 +248,7 @@ def sms_check(payload: SmsCheck, auth: BoardAuth = Depends(can_send)) -> dict[st
 class SmsSend(SmsCheck, Audience):
     use_safe_version: bool = True
     email_if_text_fails: bool = True
+    media_asset_id: int | None = None
 
 
 def _email_fallback(person: Person, body: str) -> email_service.SendResult | None:
@@ -283,7 +284,13 @@ def send_sms(payload: SmsSend, request: Request, auth: BoardAuth = Depends(can_s
     now = now_utc()
     for person in people:
         try:
-            result = sms_service.send_to_person(person, body)
+            media_url = None
+            if payload.media_asset_id:
+                asset = db.get(EmailAsset, payload.media_asset_id)
+                if asset is None or asset.kind != "image":
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The selected picture could not be found.")
+                media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"
+            result = sms_service.send_to_person(person, body, media_url)
         except sms_service.ConsentError:
             campaign.skipped_count += 1
             continue
@@ -358,6 +365,50 @@ def unsubscribe(token: str = Query(min_length=8, max_length=64), db: Session = D
         audit.record(db, actor=person, action="communication.email_unsubscribed", entity_type="person", entity_id=person.id)
         db.commit()
     return Message(message="You've been unsubscribed from Kiowa Gun Club emails. Account and dues notices will still be sent.")
+
+
+@webhook_router.post("/sms/telnyx")
+async def telnyx_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Record Telnyx message delivery/failure events idempotently."""
+    import json
+    payload = json.loads(await request.body())
+    data = payload.get("data") or {}
+    event_id = str(data.get("id") or "")
+    event_type = str(data.get("event_type") or "")
+    if not event_id:
+        return {"status": "ignored"}
+    from app.models import SmsProviderEvent
+    if db.get(SmsProviderEvent, event_id):
+        return {"status": "duplicate"}
+    db.add(SmsProviderEvent(id=event_id, event_type=event_type))
+    payload_data = data.get("payload") or {}
+    message_id = payload_data.get("id")
+    if not message_id:
+        db.commit()
+        return {"status": "ignored"}
+    recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
+    if recipient is None:
+        db.commit()
+        return {"status": "unknown message"}
+    when = _parse_time(payload.get("occurred_at")) or now_utc()
+    if event_type in {"message.sent", "message.queued"}:
+        recipient.status = "sent"
+        recipient.sent_at = recipient.sent_at or when
+    elif event_type == "message.delivered":
+        recipient.status = "delivered"
+        recipient.delivered_at = recipient.delivered_at or when
+    elif event_type in {"message.failed", "message.finalized"}:
+        recipient.status = "undelivered"
+        recipient.failed_at = recipient.failed_at or when
+        errors = payload_data.get("errors") or []
+        if errors:
+            recipient.error_code = str(errors[0].get("code") or errors[0].get("title") or "")[:80] or None
+            recipient.error = str(errors[0].get("detail") or errors[0].get("title") or "")[:2000] or None
+    else:
+        db.commit()
+        return {"status": "ignored"}
+    db.commit()
+    return {"status": "recorded"}
 
 
 # ---------------------------------------------------------------------------
