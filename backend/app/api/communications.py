@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -222,6 +225,27 @@ def email_campaign(campaign_id: int, auth: BoardAuth = Depends(can_send), db: Se
 # ---------------------------------------------------------------------------
 
 
+@router.post("/media", status_code=status.HTTP_201_CREATED)
+async def upload_sms_media(file: UploadFile = File(...), auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
+    upload = await uploads.validate_upload(file, uploads.WEB_IMAGE_TYPES, label="Text picture")
+    key = new_key("private/sms-media", upload.extension)
+    get_storage().put(key, upload.data, upload.mime_type)
+    asset = EmailAsset(kind="image", storage_key=key, original_filename=upload.original_filename,
+                       mime_type=upload.mime_type, size_bytes=upload.size_bytes, uploaded_by_id=auth.person.id)
+    db.add(asset)
+    db.commit()
+    return {"id": asset.id, "url": f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"}
+
+
+@public_router.get("/media/{token}")
+def public_media(token: str, db: Session = Depends(get_db)) -> Response:
+    asset = db.scalar(select(EmailAsset).where(EmailAsset.public_token == token, EmailAsset.kind == "image"))
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Media not found.")
+    return Response(content=get_storage().get(asset.storage_key), media_type=asset.mime_type,
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.post("/sms/audience")
 def sms_audience(payload: Audience, auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
     people = _audience(db, payload)
@@ -326,6 +350,10 @@ def sms_campaigns(page: int = Query(default=1, ge=1), auth: BoardAuth = Depends(
             "id": c.id, "kind": c.kind, "body": c.body, "recipient_summary": c.recipient_summary, "created_at": c.created_at,
             "created_by": c.created_by.full_name if c.created_by else "System", "sent": c.sent_count,
             "failed": c.failed_count, "emailed_instead": c.fallback_email_count, "skipped_no_consent": c.skipped_count,
+            "delivered": sum(1 for r in c.recipients if r.delivered_at),
+            "undelivered": sum(1 for r in c.recipients if r.status == "undelivered"),
+            "in_flight": sum(1 for r in c.recipients if r.status == "sent"),
+            "has_media": bool(c.media_asset_id),
         }
         for c in campaigns
     ]
@@ -342,7 +370,8 @@ def sms_campaign(campaign_id: int, auth: BoardAuth = Depends(can_send), db: Sess
         "created_at": campaign.created_at, "created_by": campaign.created_by.full_name if campaign.created_by else "System",
         "recipients": [
             {"name": names.get(r.person_id or 0), "phone": r.phone, "gateway_address": r.gateway_address, "status": r.status,
-             "error": r.error, "sent_at": r.sent_at, "emailed_instead": r.fallback_email_sent}
+             "error": r.error, "error_code": r.error_code, "sent_at": r.sent_at, "delivered_at": r.delivered_at,
+             "failed_at": r.failed_at, "emailed_instead": r.fallback_email_sent}
             for r in campaign.recipients
         ],
     }
