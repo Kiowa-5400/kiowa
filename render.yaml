@@ -51,7 +51,15 @@ envVarGroups:
       - key: EMAIL_REPLY_TO
         sync: false
       - key: SMS_PROVIDER
-        value: gateway
+        value: telnyx
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: TELNYX_MESSAGING_PROFILE_ID
+        sync: false
+      - key: TELNYX_FROM_NUMBER
+        sync: false
+      - key: TELNYX_WEBHOOK_PUBLIC_KEY
+        sync: false
       - key: VERIPHONE_API_KEY
         sync: false
       - key: CRON_SECRET
