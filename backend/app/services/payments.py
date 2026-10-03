@@ -145,6 +145,9 @@ def start_checkout(db: Session, application: Application, person: Person, contex
             "client_reference_id": str(payment.id),
             "submit_type": "pay",
             # No payment_method_types: Checkout offers the methods enabled in the Stripe Dashboard.
+            # The club collects its own dues; Stripe acting as merchant of record (Managed
+            # Payments, on by default for new accounts) would also demand a product tax code.
+            "managed_payments": {"enabled": False},
             "line_items": [
                 {
                     "quantity": 1,

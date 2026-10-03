@@ -291,6 +291,7 @@ def test_checkout_uses_server_side_amount_and_metadata(api, new_api, db, gateway
     session = next(iter(gateway.sessions.values()))
     assert session["params"]["line_items"][0]["price_data"]["unit_amount"] == 15000
     assert session["params"]["metadata"]["application_id"] == str(application["id"])
+    assert session["params"]["managed_payments"] == {"enabled": False}
     assert "{CHECKOUT_SESSION_ID}" in session["params"]["success_url"]
     # Stripe returns members to the portal, not the application form.
     assert session["params"]["success_url"].startswith("http://localhost:5174/payments/return")
