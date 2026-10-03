@@ -114,4 +114,3 @@ export function errorMessage(error: unknown): string {
 
 export type Page<T> = { items: T[]; total: number; page: number; page_size: number };
 
-export type SiteAccess = { mode: 'public' | 'board'; authorized: boolean; board_login_url: string };

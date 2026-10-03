@@ -32,11 +32,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh().catch(() => setProfile(null)).finally(() => setChecking(false));
-    return onUnauthorized((error) => {
-      if (error.code !== 'preview_locked') {
-        setProfile(null);
-        setCsrfToken(null);
-      }
+    return onUnauthorized(() => {
+      setProfile(null);
+      setCsrfToken(null);
     });
   }, [refresh]);
 

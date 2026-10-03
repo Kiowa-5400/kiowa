@@ -26,7 +26,6 @@ from app.api import (
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, request_id_var
-from app.core.site_access import gate_applies, has_board_session
 from app.services.membership import WorkflowError
 
 logger = logging.getLogger("kiowa.http")
@@ -90,12 +89,6 @@ def create_app() -> FastAPI:
             declared = request.headers.get("content-length", "")
             if declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
                 response = JSONResponse(status_code=413, content=_error_body("That upload is too large.", request))
-            elif request.method != "OPTIONS" and gate_applies(request.url.path) and not has_board_session(request):
-                response = JSONResponse(
-                    status_code=401,
-                    content={"detail": "This site is in private preview. Sign in with a board account to view it.",
-                             "code": "preview_locked", "request_id": request_id},
-                )
             else:
                 response = await call_next(request)
         finally:
@@ -144,10 +137,19 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("unhandled_error", extra={"path": request.url.path, "method": request.method})
-        return JSONResponse(
+        response = JSONResponse(
             status_code=500,
             content=_error_body("Something went wrong on our end. Please try again, or contact the club if it keeps happening.", request),
         )
+        # Unhandled errors are answered by Starlette's outermost middleware, which sits outside
+        # CORSMiddleware. Without these headers the browser reports a misleading CORS failure
+        # instead of the real 500.
+        origin = request.headers.get("origin", "")
+        if origin and origin in settings.cors_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+        return response
 
     for router in (
         system.router,

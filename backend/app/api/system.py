@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.core.config import get_settings
 from app.core.security import constant_time_equals
-from app.core.site_access import has_board_session
 from app.jobs import DAILY, JOBS, run_job
 
 router = APIRouter(tags=["system"])
@@ -38,18 +37,6 @@ def ready(db: Session = Depends(get_db)) -> dict[str, object]:
             "email": settings.email_provider,
             "sms": settings.sms_provider,
         },
-    }
-
-
-@router.get("/api/site-access")
-def site_access(request: Request) -> dict[str, object]:
-    """Lets the www/apply apps decide whether to show the private-preview screen."""
-    settings = get_settings()
-    locked = settings.site_access == "board"
-    return {
-        "mode": settings.site_access,
-        "authorized": (not locked) or has_board_session(request),
-        "board_login_url": f"{settings.board_app_url.rstrip('/')}/login",
     }
 
 

@@ -31,10 +31,6 @@ class Settings(BaseSettings):
 
     club_timezone: str = "America/Chicago"
 
-    # "board" puts the public site and the apply app behind a board sign-in
-    # (pre-launch preview). Set to "public" at launch.
-    site_access: Literal["public", "board"] = "public"
-
     # Session cookies. Secure defaults to on outside development/test.
     cookie_secure: bool | None = None
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"

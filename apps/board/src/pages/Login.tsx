@@ -4,39 +4,20 @@ import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, FormErrors, TextField, useAction } from '@shared/ui';
 import { useAuth } from '../auth';
 
-/** Only send people back to the club's own sites after sign-in (preview gate). */
-const ALLOWED_RETURN_ORIGINS = [import.meta.env.VITE_WWW_URL, import.meta.env.VITE_APPLY_APP_URL]
-  .filter(Boolean)
-  .map((url) => new URL(url as string).origin);
-
-function safeReturnUrl(next: string | null): string | null {
-  if (!next) return null;
-  try {
-    const url = new URL(next);
-    return ALLOWED_RETURN_ORIGINS.includes(url.origin) ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
 export function LoginPage() {
   usePageTitle('Board sign in');
-  const { query } = useLocation();
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
-  const returnTo = safeReturnUrl(query.get('next'));
   const login = useAction(async () => {
     await signIn(email, password, remember);
-    if (returnTo) window.location.assign(returnTo);
-    else navigate('/', { replace: true });
+    navigate('/', { replace: true });
   });
   return (
     <>
       <p className="kicker">Board members only</p>
       <h1>Board sign in</h1>
-      {returnTo && <Alert kind="info">Sign in to preview the club website.</Alert>}
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void login.run(); }}>
         <FormErrors error={login.error} />
         <TextField label="Email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />

@@ -36,13 +36,7 @@ The API refuses to start in production without PostgreSQL, a strong `SECRET_KEY`
 
 **After the first successful deploy, delete `BOOTSTRAP_ADMIN_PASSWORD`.**
 
-## 3. Private preview, then launch
-
-`SITE_ACCESS=public` is configured for the production launch. If the club needs a private preview again, change the value to `board` in the `kiowa-shared` environment group and redeploy the API.
-
-The static files themselves (HTML/JS) are still downloadable during the preview. All club content, member data and every form come from the API, which is what the gate protects.
-
-## 4. Scheduled jobs
+## 3. Scheduled jobs
 
 `kiowa-daily-jobs` runs once a day:
 
