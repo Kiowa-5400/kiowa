@@ -126,8 +126,29 @@ export function TextField({ label, error, hint, required, id, ...input }: FieldB
     <div className="field">
       <label htmlFor={fieldId} className={required ? 'required' : undefined}>{label}</label>
       {hint && <span id={`${fieldId}-hint`} className="hint">{hint}</span>}
-      <input id={fieldId} required={required} aria-invalid={error ? true : undefined} aria-describedby={describedBy} {...input} />
+      {input.type === 'password'
+        ? <PasswordInput id={fieldId} required={required} aria-invalid={error ? true : undefined} aria-describedby={describedBy} {...input} />
+        : <input id={fieldId} required={required} aria-invalid={error ? true : undefined} aria-describedby={describedBy} {...input} />}
       {error && <span id={`${fieldId}-error`} className="error">{error}</span>}
+    </div>
+  );
+}
+
+/** A password input with an eye button so people can check what they typed. */
+function PasswordInput(input: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="password-input">
+      <input {...input} type={visible ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+      <button type="button" className="password-toggle" aria-controls={input.id} aria-pressed={visible}
+        aria-label={visible ? 'Hide password' : 'Show password'} title={visible ? 'Hide password' : 'Show password'}
+        onClick={() => setVisible((v) => !v)}>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+          {visible && <path d="M3 3l18 18" />}
+        </svg>
+      </button>
     </div>
   );
 }
