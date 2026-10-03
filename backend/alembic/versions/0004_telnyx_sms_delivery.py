@@ -20,8 +20,8 @@ def upgrade() -> None:
     op.add_column("sms_recipients", sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("sms_recipients", sa.Column("failed_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("sms_recipients", sa.Column("error_code", sa.String(length=80), nullable=True))
-    op.drop_constraint("ck_sms_recipients_status", "sms_recipients", type_="check")
-    op.create_check_constraint("ck_sms_recipients_status", "sms_recipients", "status IN ('queued', 'sent', 'delivered', 'undelivered', 'failed', 'skipped')")
+    op.drop_constraint(op.f("ck_sms_recipients_status"), "sms_recipients", type_="check")
+    op.create_check_constraint(op.f("ck_sms_recipients_status"), "sms_recipients", "status IN ('queued', 'sent', 'delivered', 'undelivered', 'failed', 'skipped')")
     op.create_table(
         "sms_provider_events",
         sa.Column("id", sa.String(length=255), primary_key=True),
@@ -31,8 +31,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("sms_provider_events")
-    op.drop_constraint("ck_sms_recipients_status", "sms_recipients", type_="check")
-    op.create_check_constraint("ck_sms_recipients_status", "sms_recipients", "status IN ('queued', 'sent', 'failed', 'skipped')")
+    op.drop_constraint(op.f("ck_sms_recipients_status"), "sms_recipients", type_="check")
+    op.create_check_constraint(op.f("ck_sms_recipients_status"), "sms_recipients", "status IN ('queued', 'sent', 'failed', 'skipped')")
     op.drop_column("sms_recipients", "error_code")
     op.drop_column("sms_recipients", "failed_at")
     op.drop_column("sms_recipients", "delivered_at")
