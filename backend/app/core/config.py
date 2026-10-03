@@ -20,12 +20,13 @@ class Settings(BaseSettings):
     secret_key: str = ""
     database_url: str = ""
 
-    # Browser origins allowed to call the API with credentials (www, apply, board).
+    # Browser origins allowed to call the API with credentials (www, portal, apply, board).
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # Public URLs used to build links in emails and Stripe redirects.
     public_site_url: str = "http://localhost:4173"
-    apply_app_url: str = "http://localhost:5173"
+    portal_app_url: str = "http://localhost:5174"  # member sign-in, account, application status, payment
+    apply_app_url: str = "http://localhost:5173"  # the membership application form
     board_app_url: str = "http://localhost:4174"
     api_public_url: str = "http://localhost:8000"
 
@@ -112,7 +113,7 @@ class Settings(BaseSettings):
         if not self.local_storage_dir:
             problems.append("LOCAL_STORAGE_DIR must be set")
         if not self.cors_origins:
-            problems.append("CORS_ORIGINS must list the deployed www, apply and board origins")
+            problems.append("CORS_ORIGINS must list the deployed www, portal, apply and board origins")
         elif any(not origin.startswith("https://") for origin in self.cors_origins):
             problems.append("CORS_ORIGINS must only contain https:// origins in production")
         if self.cookie_secure is False:

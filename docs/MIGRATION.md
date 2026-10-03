@@ -7,7 +7,7 @@ kiowa-gun (Next.js on Cloudflare Workers with D1, R2, Resend and an email-to-SMS
 | Capability | kiowa-gun | kiowa now |
 |---|---|---|
 | Board accounts & roles | `admin_users`, PBKDF2, 5 roles, invite/reset links, lockout, last-president guard | `board_users` role on top of one per-person login (Argon2). Same 5 roles and rank rules, invite/reset/unlock/deactivate, last president/tech admin protected, every change audited. `backend/app/core/permissions.py`, `app/api/board_users.py` |
-| Member portal | Separate `members` login; signup only for existing Member rows | Same login for everyone; existing contacts claim their record through an emailed link, and new people register to apply. Email verification is required before sign-in. `app/api/auth.py`, `apps/apply` |
+| Member portal | Separate `members` login; signup only for existing Member rows | Same login for everyone; existing contacts claim their record through an emailed link, and new people register to apply. Email verification is required before sign-in. `app/api/auth.py`, `apps/portal` |
 | Contacts & groups | status + `on_board` + `on_shooting_committee` flags | Same model plus waiting list / former groups; search, filters, CSV import, history per person. `app/services/people.py`, `apps/board` Members |
 | Application workflow | Sign rules, then upload; board toggles background check, which emails an invoice | Draft → submitted → (needs info) → approved → payment requested → completed. Document review drives NRA verification and background check clearance; notes; decline with reason. `app/services/membership.py` |
 | Payment eligibility | `recomputeCanPay` → `can_pay` | `evaluate_payment_eligibility` with stored reason, checked by every payment entry point |

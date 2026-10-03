@@ -7,11 +7,11 @@ Everything is described in [`render.yaml`](../render.yaml) (a Render Blueprint):
 | `kiowa-db` | PostgreSQL 16 | The database |
 | `kiowa-api` | Web service (Python) | `uvicorn app.main:app` with 1 worker and a 10 GB persistent disk; health check `/health`; pre-deploy `alembic upgrade head && python -m app.cli bootstrap-admin` |
 | `kiowa-daily-jobs` | Cron job | `python -m app.jobs daily` at 13:00 UTC (8 AM CDT / 7 AM CST) |
-| `kiowa-www`, `kiowa-apply`, `kiowa-board` | Static sites | `npm ci && npm run build` with security headers and an SPA rewrite |
+| `kiowa-www`, `kiowa-portal`, `kiowa-apply`, `kiowa-board` | Static sites | `npm ci && npm run build` with security headers and an SPA rewrite |
 
 ## 1. Before the first deploy
 
-1. **Domains.** The API sets its session cookies itself, so the four sites must share one parent domain: `kiowagunclub.org` (www), `apply.kiowagunclub.org`, `board.kiowagunclub.org`, `api.kiowagunclub.org`.
+1. **Domains.** The API sets its session cookies itself, so the five sites must share one parent domain: `kiowagunclub.org` (www), `portal.kiowagunclub.org` (member sign-in and account), `apply.kiowagunclub.org` (application form), `board.kiowagunclub.org`, `api.kiowagunclub.org`.
 2. **Render storage.** The production API uses the paid Render persistent disk mounted at `/var/data/kiowa-storage`. Keep the API at one instance; the disk is attached to that instance.
 3. **Stripe.** In the Stripe Dashboard, add `https://api.kiowagunclub.org/api/webhooks/stripe` for the configured checkout events and copy the signing secret/API key.
 4. **Email (Resend).** Verify `kiowagunclub.org` as a sending domain in Resend, create an API key, and add a webhook to `https://api.kiowagunclub.org/api/webhooks/email/resend` for delivered, opened, clicked, bounced and complained events. Copy its signing secret.

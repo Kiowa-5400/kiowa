@@ -2,11 +2,12 @@
 #
 # Domains assumed below (set them in each service's Custom Domains):
 #   kiowagunclub.org        -> kiowa-www      (public site)
-#   apply.kiowagunclub.org  -> kiowa-apply    (member portal + applications)
+#   portal.kiowagunclub.org -> kiowa-portal   (member sign-in, account, status, payment)
+#   apply.kiowagunclub.org  -> kiowa-apply    (membership application form)
 #   board.kiowagunclub.org  -> kiowa-board    (board administration)
 #   api.kiowagunclub.org    -> kiowa-api      (FastAPI)
-# All four must share one parent domain so the API's session cookies are
-# same-site for the three apps. See docs/DEPLOYMENT.md.
+# All five must share one parent domain so the API's session cookies are
+# same-site for the four apps. See docs/DEPLOYMENT.md.
 
 envVarGroups:
   - name: kiowa-shared
@@ -18,9 +19,11 @@ envVarGroups:
       - key: SECRET_KEY
         generateValue: true
       - key: CORS_ORIGINS
-        value: https://kiowagunclub.org,https://www.kiowagunclub.org,https://apply.kiowagunclub.org,https://board.kiowagunclub.org
+        value: https://kiowagunclub.org,https://www.kiowagunclub.org,https://portal.kiowagunclub.org,https://apply.kiowagunclub.org,https://board.kiowagunclub.org
       - key: PUBLIC_SITE_URL
         value: https://kiowagunclub.org
+      - key: PORTAL_APP_URL
+        value: https://portal.kiowagunclub.org
       - key: APPLY_APP_URL
         value: https://apply.kiowagunclub.org
       - key: BOARD_APP_URL
@@ -124,6 +127,8 @@ services:
         value: "22.20.0"
       - key: VITE_API_BASE_URL
         value: https://api.kiowagunclub.org
+      - key: VITE_PORTAL_APP_URL
+        value: https://portal.kiowagunclub.org
       - key: VITE_APPLY_APP_URL
         value: https://apply.kiowagunclub.org
       - key: VITE_BOARD_APP_URL
@@ -153,6 +158,28 @@ services:
         value: public, max-age=31536000, immutable
 
   - type: web
+    name: kiowa-portal
+    runtime: static
+    buildCommand: cd apps/portal && npm ci && npm run build
+    staticPublishPath: apps/portal/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22.20.0"
+      - key: VITE_API_BASE_URL
+        value: https://api.kiowagunclub.org
+      - key: VITE_WWW_URL
+        value: https://kiowagunclub.org
+      - key: VITE_PORTAL_APP_URL
+        value: https://portal.kiowagunclub.org
+      - key: VITE_APPLY_APP_URL
+        value: https://apply.kiowagunclub.org
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers: *static-headers
+
+  - type: web
     name: kiowa-apply
     runtime: static
     buildCommand: cd apps/apply && npm ci && npm run build
@@ -164,6 +191,10 @@ services:
         value: https://api.kiowagunclub.org
       - key: VITE_WWW_URL
         value: https://kiowagunclub.org
+      - key: VITE_PORTAL_APP_URL
+        value: https://portal.kiowagunclub.org
+      - key: VITE_APPLY_APP_URL
+        value: https://apply.kiowagunclub.org
     routes:
       - type: rewrite
         source: /*

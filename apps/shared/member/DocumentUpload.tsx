@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import { api, errorMessage } from '@shared/api';
 import { formatBytes } from '@shared/format';
-import type { DocumentRequirement, UploadedDocument } from '../types';
+import type { DocumentRequirement, UploadedDocument } from './types';
 
 const REVIEW_BADGE: Record<string, string> = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' };
 

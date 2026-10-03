@@ -285,7 +285,7 @@ def submit_application(
 
 
 def _application_link(application: Application) -> str:
-    return f"{get_settings().apply_app_url.rstrip('/')}/applications/{application.id}"
+    return f"{get_settings().portal_app_url.rstrip('/')}/applications/{application.id}"
 
 
 # ---------------------------------------------------------------------------

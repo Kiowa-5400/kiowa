@@ -3,14 +3,14 @@ import { api } from '@shared/api';
 import { formatMoney } from '@shared/format';
 import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, ErrorState, FormErrors, Loading, TextArea, TextField, useAction, useAsync } from '@shared/ui';
-import { useAuth, useProfile } from '../auth';
-import { DocumentUpload } from '../components/DocumentUpload';
-import { ProfileFields, profileForm, profilePayload, type ProfileForm } from '../components/ProfileFields';
-import type { Application, FormDefinition, Profile } from '../types';
+import { useAuth, useProfile } from '@shared/member/auth';
+import { DocumentUpload } from '@shared/member/DocumentUpload';
+import { ProfileFields, profileForm, profilePayload, type ProfileForm } from '@shared/member/ProfileFields';
+import type { Application, FormDefinition, Profile } from '@shared/member/types';
+import { PORTAL_URL, WWW_URL } from '@shared/member/urls';
 
 const STEPS = ['Application type', 'Your information', 'Documents', 'Read and sign the Range Rules'];
 const EDITABLE = ['draft', 'needs_info'];
-const WWW_URL: string = import.meta.env.VITE_WWW_URL || 'http://localhost:4173';
 
 /** Which wizard step owns each server-side validation error. */
 function stepForError(field: string): number {
@@ -43,12 +43,12 @@ export function ApplyWizard() {
       <section className="card stack">
         <h1>You already have an application in progress</h1>
         <p>Your {application.application_type === 'renewal' ? 'renewal' : 'waiting-list application'} is: <strong>{application.status_label}</strong>.</p>
-        <Link className="btn btn-primary" to={`/applications/${application.id}`}>View your application</Link>
+        <a className="btn btn-primary" href={`${PORTAL_URL}/applications/${application.id}`}>View your application</a>
       </section>
     );
   }
 
-  const go = (n: number) => navigate(`/apply?step=${n}`);
+  const go = (n: number) => navigate(`/?step=${n}`);
   const reload = async () => setApplication(await api<Application>(`/api/applications/${application!.id}`));
 
   return (
@@ -72,7 +72,7 @@ export function ApplyWizard() {
 
       {step === 0 && <TypeStep form={form.data!} profile={profile} application={application} requested={requestedType}
         onStarted={(a) => { setApplication(a); go(1); }} />}
-      {step > 0 && !application && <Alert kind="info">Choose an application type first. <Link to="/apply?step=0">Start here</Link>.</Alert>}
+      {step > 0 && !application && <Alert kind="info">Choose an application type first. <Link to="/?step=0">Start here</Link>.</Alert>}
       {step === 1 && application && <InfoStep application={application} profile={profile} onSaved={(p) => { setProfile(p); go(2); }} onBack={() => go(0)} />}
       {step === 2 && application && <DocumentsStep application={application} form={form.data!} reload={reload} onNext={() => go(3)} onBack={() => go(1)} />}
       {step === 3 && application && <SignStep application={application} form={form.data!} profile={profile} onBack={() => go(2)} goToStep={go} />}
@@ -222,7 +222,7 @@ function SignStep({ application, form, profile, onBack, goToStep }: {
     const result = await api<Application>(`/api/applications/${application.id}/submit`, {
       body: { rules_version: form.rules.version, accept_rules: accept, printed_name: printed, signature_name: signature },
     });
-    navigate(`/applications/${result.id}?submitted=1`, { replace: true });
+    window.location.replace(`${PORTAL_URL}/applications/${result.id}?submitted=1`);
   });
   const stepsWithErrors = [...new Set(Object.keys(submit.fieldErrors).map(stepForError))].filter((s) => s !== 3);
 

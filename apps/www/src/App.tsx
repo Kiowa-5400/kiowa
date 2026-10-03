@@ -59,8 +59,8 @@ export function App() {
             {NAV.map((item) => (
               <Link key={item.to} to={item.to} aria-current={path === item.to ? 'page' : undefined}>{item.label}</Link>
             ))}
-            <a href={`${site.apply_url}/login`}>Member login</a>
-            <a className="btn btn-primary btn-sm nav-cta" href={`${site.apply_url}/apply`}>Renew or apply</a>
+            <a href={`${site.portal_url}/login`}>Member login</a>
+            <a className="btn btn-primary btn-sm nav-cta" href={`${site.apply_url}/`}>Renew or apply</a>
           </nav>
         </div>
       </header>
@@ -96,7 +96,7 @@ function Footer() {
         <nav aria-label="Footer">
           <ul className="footer-links">
             {site.footer_links.map((link) => <li key={link.url}><a href={link.url}>{link.label}</a></li>)}
-            <li><a href={site.apply_url}>Member portal</a></li>
+            <li><a href={site.portal_url}>Member portal</a></li>
             <li><a href={BOARD_APP_URL}>Board login</a></li>
           </ul>
         </nav>
