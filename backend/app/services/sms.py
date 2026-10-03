@@ -1,14 +1,8 @@
-"""Text messages through each carrier's email-to-SMS gateway, plus consent enforcement.
+"""Text messages through Twilio Programmable Messaging with consent enforcement.
 
-Ported from kiowa-gun (lib/sms.ts, lib/veriphone.ts): the member's carrier is
-looked up once with Veriphone (https://veriphone.io) and cached on their
-record, then the text is emailed as plain text to
-<10-digit number>@<carrier gateway domain> through the email provider
-(Resend). This avoids A2P 10DLC registration, at the cost of no delivery
-receipts and no picture messages.
-
-The carrier lookup and gateway transport sit behind ``SmsProvider`` so a
-dedicated SMS API could replace them without touching business logic.
+The production provider uses a Twilio Messaging Service for SMS/MMS delivery.
+Delivery status is finalized by Twilio status callbacks. Veriphone remains
+available only for the legacy carrier-gateway fallback.
 
 Consent rule: nothing in this module sends to a person who hasn't opted in.
 """
@@ -113,19 +107,45 @@ class VeriphoneLookup:
 
 class SmsProvider(Protocol):
     name: str
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult: ...
 
-    def send(self, person: Person, body: str) -> SmsResult: ...
+
+class TwilioSmsProvider:
+    """Twilio Programmable Messaging provider; delivery is finalized by webhook."""
+
+    name = "twilio"
+
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
+        number = to_e164(person.phone)
+        if not number:
+            return SmsResult("failed", "No valid 10-digit mobile number on file.")
+        settings = get_settings()
+        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
+            return SmsResult("failed", "Twilio messaging is not configured.")
+
+        try:
+            from twilio.rest import Client
+
+            kwargs: dict[str, object] = {
+                "body": body,
+                "to": number,
+                "messaging_service_sid": settings.twilio_messaging_service_sid,
+                "status_callback": f"{settings.api_public_url.rstrip('/')}/api/webhooks/sms/twilio",
+            }
+            if media_url:
+                kwargs["media_url"] = [media_url]
+            message = Client(settings.twilio_account_sid, settings.twilio_auth_token).messages.create(**kwargs)
+        except Exception as exc:
+            logger.exception("twilio_send_failed")
+            return SmsResult("failed", f"Twilio request failed: {exc}")
+        return SmsResult("sent", None, None, message.sid)
 
 
 class GatewaySmsProvider:
-    """Veriphone carrier lookup (cached on the person) + the club mailbox SMTP server to the carrier gateway."""
-
     name = "gateway"
-
     def __init__(self, lookup: CarrierLookup) -> None:
         self.lookup = lookup
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         digits = ten_digits(person.phone)
         if not digits:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
@@ -133,7 +153,6 @@ class GatewaySmsProvider:
             carrier, error = self.lookup.lookup(f"+1{digits}")
             if not carrier:
                 return SmsResult("failed", error)
-            # Saved with the caller's transaction; cleared whenever the phone number changes.
             person.sms_carrier = carrier[:120]
         domain = gateway_domain_for_carrier(person.sms_carrier)
         if not domain:
@@ -151,14 +170,10 @@ class GatewaySmsProvider:
 
 
 class ConsoleSmsProvider:
-    """Development/test provider: records texts instead of sending them."""
-
     name = "console"
-
     def __init__(self) -> None:
         self.outbox: list[tuple[str, str]] = []
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         number = to_e164(person.phone)
         if not number:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
@@ -169,14 +184,18 @@ class ConsoleSmsProvider:
 
 class DisabledSmsProvider:
     name = "disabled"
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         return SmsResult("failed", "Text messaging is not configured.")
 
 
 @lru_cache(maxsize=1)
 def get_sms_provider() -> SmsProvider:
     settings = get_settings()
+    if settings.sms_provider == "twilio":
+        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
+            logger.error("sms_provider_misconfigured", extra={"detail": "Twilio credentials or Messaging Service SID missing"})
+            return DisabledSmsProvider()
+        return TwilioSmsProvider()
     if settings.sms_provider == "gateway":
         if not settings.veriphone_api_key:
             logger.error("sms_provider_misconfigured", extra={"detail": "VERIPHONE_API_KEY missing"})
@@ -191,11 +210,11 @@ class ConsentError(Exception):
     pass
 
 
-def send_to_person(person: Person, body: str) -> SmsResult:
+def send_to_person(person: Person, body: str, media_url: str | None = None) -> SmsResult:
     """The only path to an outgoing text. Refuses anyone without recorded consent."""
     if not person.sms_opt_in or person.sms_opt_in_at is None:
         raise ConsentError("This person has not opted in to text messages.")
-    return get_sms_provider().send(person, body)
+    return get_sms_provider().send(person, body, media_url)
 
 
 # ---------------------------------------------------------------------------

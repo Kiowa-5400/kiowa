@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from pydantic import Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -222,6 +223,27 @@ def email_campaign(campaign_id: int, auth: BoardAuth = Depends(can_send), db: Se
 # ---------------------------------------------------------------------------
 
 
+@router.post("/media", status_code=status.HTTP_201_CREATED)
+async def upload_sms_media(file: UploadFile = File(...), auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
+    upload = await uploads.validate_upload(file, uploads.WEB_IMAGE_TYPES, label="Text picture")
+    key = new_key("private/sms-media", upload.extension)
+    get_storage().put(key, upload.data, upload.mime_type)
+    asset = EmailAsset(kind="image", storage_key=key, original_filename=upload.original_filename,
+                       mime_type=upload.mime_type, size_bytes=upload.size_bytes, uploaded_by_id=auth.person.id)
+    db.add(asset)
+    db.commit()
+    return {"id": asset.id, "url": f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"}
+
+
+@public_router.get("/media/{token}")
+def public_media(token: str, db: Session = Depends(get_db)) -> Response:
+    asset = db.scalar(select(EmailAsset).where(EmailAsset.public_token == token, EmailAsset.kind == "image"))
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Media not found.")
+    return Response(content=get_storage().get(asset.storage_key), media_type=asset.mime_type,
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.post("/sms/audience")
 def sms_audience(payload: Audience, auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
     people = _audience(db, payload)
@@ -248,6 +270,7 @@ def sms_check(payload: SmsCheck, auth: BoardAuth = Depends(can_send)) -> dict[st
 class SmsSend(SmsCheck, Audience):
     use_safe_version: bool = True
     email_if_text_fails: bool = True
+    media_asset_id: int | None = None
 
 
 def _email_fallback(person: Person, body: str) -> email_service.SendResult | None:
@@ -278,12 +301,21 @@ def send_sms(payload: SmsSend, request: Request, auth: BoardAuth = Depends(can_s
     body = sms_service.build_safe_message(payload.body) if risky and payload.use_safe_version else payload.body
 
     campaign = SmsCampaign(kind="manual", body=body, recipient_summary=_summary(payload, db), created_by_id=auth.person.id)
+    if payload.media_asset_id:
+        media_asset = db.get(EmailAsset, payload.media_asset_id)
+        if media_asset is None or media_asset.kind != "image":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The selected picture could not be found.")
+        campaign.media_asset_id = media_asset.id
     db.add(campaign)
     db.flush()
+    media_url = None
+    if campaign.media_asset_id:
+        media_asset = db.get(EmailAsset, campaign.media_asset_id)
+        media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{media_asset.public_token}"
     now = now_utc()
     for person in people:
         try:
-            result = sms_service.send_to_person(person, body)
+            result = sms_service.send_to_person(person, body, media_url)
         except sms_service.ConsentError:
             campaign.skipped_count += 1
             continue
@@ -319,6 +351,10 @@ def sms_campaigns(page: int = Query(default=1, ge=1), auth: BoardAuth = Depends(
             "id": c.id, "kind": c.kind, "body": c.body, "recipient_summary": c.recipient_summary, "created_at": c.created_at,
             "created_by": c.created_by.full_name if c.created_by else "System", "sent": c.sent_count,
             "failed": c.failed_count, "emailed_instead": c.fallback_email_count, "skipped_no_consent": c.skipped_count,
+            "delivered": sum(1 for r in c.recipients if r.delivered_at),
+            "undelivered": sum(1 for r in c.recipients if r.status == "undelivered"),
+            "in_flight": sum(1 for r in c.recipients if r.status == "sent"),
+            "has_media": bool(c.media_asset_id),
         }
         for c in campaigns
     ]
@@ -335,7 +371,8 @@ def sms_campaign(campaign_id: int, auth: BoardAuth = Depends(can_send), db: Sess
         "created_at": campaign.created_at, "created_by": campaign.created_by.full_name if campaign.created_by else "System",
         "recipients": [
             {"name": names.get(r.person_id or 0), "phone": r.phone, "gateway_address": r.gateway_address, "status": r.status,
-             "error": r.error, "sent_at": r.sent_at, "emailed_instead": r.fallback_email_sent}
+             "error": r.error, "error_code": r.error_code, "sent_at": r.sent_at, "delivered_at": r.delivered_at,
+             "failed_at": r.failed_at, "emailed_instead": r.fallback_email_sent}
             for r in campaign.recipients
         ],
     }
@@ -358,6 +395,64 @@ def unsubscribe(token: str = Query(min_length=8, max_length=64), db: Session = D
         audit.record(db, actor=person, action="communication.email_unsubscribed", entity_type="person", entity_id=person.id)
         db.commit()
     return Message(message="You've been unsubscribed from Kiowa Gun Club emails. Account and dues notices will still be sent.")
+
+
+@webhook_router.post("/sms/twilio")
+async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Record Twilio SMS/MMS delivery status callbacks idempotently."""
+    from twilio.request_validator import RequestValidator
+    form = await request.form()
+    params = {str(k): str(v) for k, v in form.items()}
+    signature = request.headers.get("X-Twilio-Signature", "")
+    settings = get_settings()
+    if not settings.twilio_auth_token:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Twilio webhook is not configured.")
+    validator = RequestValidator(settings.twilio_auth_token)
+    if not signature or not validator.validate(str(request.url), params, signature):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
+
+    message_id = params.get("MessageSid") or ""
+    message_status = (params.get("MessageStatus") or "").lower()
+    error_code = params.get("ErrorCode") or None
+    if not message_id or not message_status:
+        return {"status": "ignored"}
+
+    event_id = f"{message_id}:{message_status}:{error_code or ''}"
+    from app.models import SmsProviderEvent
+    if db.get(SmsProviderEvent, event_id):
+        return {"status": "duplicate"}
+
+    db.add(SmsProviderEvent(id=event_id, event_type=f"message.{message_status}"))
+    recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
+    if recipient is None:
+        db.commit()
+        return {"status": "unknown message"}
+
+    when = now_utc()
+    if message_status in {"queued", "accepted"}:
+        recipient.status = "queued"
+    elif message_status in {"sending", "sent"}:
+        recipient.status = "sent"
+        recipient.sent_at = recipient.sent_at or when
+    elif message_status == "delivered":
+        recipient.status = "delivered"
+        recipient.delivered_at = recipient.delivered_at or when
+    elif message_status == "undelivered":
+        recipient.status = "undelivered"
+        recipient.failed_at = recipient.failed_at or when
+        recipient.error_code = error_code[:80] if error_code else None
+        recipient.error = params.get("ErrorMessage") or recipient.error
+    elif message_status == "failed":
+        recipient.status = "failed"
+        recipient.failed_at = recipient.failed_at or when
+        recipient.error_code = error_code[:80] if error_code else None
+        recipient.error = params.get("ErrorMessage") or recipient.error
+    else:
+        db.commit()
+        return {"status": "ignored"}
+
+    db.commit()
+    return {"status": "recorded"}
 
 
 # ---------------------------------------------------------------------------

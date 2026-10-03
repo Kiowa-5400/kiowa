@@ -578,7 +578,7 @@ class MatchPhoto(Base):
 
 CAMPAIGN_KINDS = ("manual", "renewal_reminder", "system")
 EMAIL_RECIPIENT_STATUSES = ("queued", "sent", "failed", "delivered", "bounced", "complained")
-SMS_RECIPIENT_STATUSES = ("queued", "sent", "failed", "skipped")
+SMS_RECIPIENT_STATUSES = ("queued", "sent", "delivered", "undelivered", "failed", "skipped")
 
 
 class EmailCampaign(Base):
@@ -653,6 +653,7 @@ class SmsCampaign(Base):
     failed_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     skipped_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     fallback_email_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    media_asset_id: Mapped[int | None] = mapped_column(ForeignKey("email_assets.id", ondelete="SET NULL"))
 
     recipients: Mapped[list[SmsRecipient]] = relationship(back_populates="campaign", cascade="all, delete-orphan")
     created_by: Mapped[Person | None] = relationship()
@@ -666,16 +667,27 @@ class SmsRecipient(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("sms_campaigns.id", ondelete="CASCADE"), index=True)
     person_id: Mapped[int | None] = mapped_column(ForeignKey("people.id", ondelete="SET NULL"), index=True)
     phone: Mapped[str] = mapped_column(String(40))
-    # <number>@<carrier gateway> the text was emailed to, kept for troubleshooting.
+    # Retained for historical gateway deliveries; Telnyx deliveries leave this null.
     gateway_address: Mapped[str | None] = mapped_column(String(255))
     provider_message_id: Mapped[str | None] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(20), default="queued", server_default="queued")
     error: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(80))
     # When the text failed, the same message was emailed to the person instead.
     fallback_email_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     campaign: Mapped[SmsCampaign] = relationship(back_populates="recipients")
+
+
+class SmsProviderEvent(Base):
+    __tablename__ = "sms_provider_events"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=func.now())
 
 
 # ---------------------------------------------------------------------------

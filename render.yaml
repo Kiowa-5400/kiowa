@@ -51,7 +51,13 @@ envVarGroups:
       - key: EMAIL_REPLY_TO
         sync: false
       - key: SMS_PROVIDER
-        value: gateway
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
       - key: VERIPHONE_API_KEY
         sync: false
       - key: CRON_SECRET
