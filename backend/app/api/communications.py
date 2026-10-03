@@ -303,17 +303,20 @@ def send_sms(payload: SmsSend, request: Request, auth: BoardAuth = Depends(can_s
     body = sms_service.build_safe_message(payload.body) if risky and payload.use_safe_version else payload.body
 
     campaign = SmsCampaign(kind="manual", body=body, recipient_summary=_summary(payload, db), created_by_id=auth.person.id)
+    if payload.media_asset_id:
+        media_asset = db.get(EmailAsset, payload.media_asset_id)
+        if media_asset is None or media_asset.kind != "image":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The selected picture could not be found.")
+        campaign.media_asset_id = media_asset.id
     db.add(campaign)
     db.flush()
+    media_url = None
+    if campaign.media_asset_id:
+        media_asset = db.get(EmailAsset, campaign.media_asset_id)
+        media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{media_asset.public_token}"
     now = now_utc()
     for person in people:
         try:
-            media_url = None
-            if payload.media_asset_id:
-                asset = db.get(EmailAsset, payload.media_asset_id)
-                if asset is None or asset.kind != "image":
-                    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The selected picture could not be found.")
-                media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"
             result = sms_service.send_to_person(person, body, media_url)
         except sms_service.ConsentError:
             campaign.skipped_count += 1
