@@ -47,15 +47,10 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
 
-    # Object storage. "local" exists only for development and tests and is
-    # refused in production (Render's filesystem is ephemeral).
-    storage_backend: Literal["s3", "local"] = "local"
+    # File storage. Render's paid persistent disk is mounted at this path in production.
+    # Local development defaults to a project-local directory.
+    storage_backend: Literal["local"] = "local"
     local_storage_dir: str = ".storage"
-    s3_bucket: str = ""
-    s3_region: str = "auto"
-    s3_endpoint_url: str = ""
-    s3_access_key_id: str = ""
-    s3_secret_access_key: str = ""
 
     max_upload_mb: int = 10
 
@@ -68,7 +63,7 @@ class Settings(BaseSettings):
     email_reply_to: str = ""
 
     # SMS
-    # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier's email-to-SMS gateway.
+    # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
     sms_provider: Literal["gateway", "console", "disabled"] = "console"
     veriphone_api_key: str = ""
     sms_from_name: str = "Kiowa Gun Club"
@@ -113,10 +108,10 @@ class Settings(BaseSettings):
             problems.append("SECRET_KEY must be set to at least 32 random characters")
         if not self.database_url.startswith("postgresql"):
             problems.append("DATABASE_URL must point at PostgreSQL")
-        if self.storage_backend != "s3":
-            problems.append("STORAGE_BACKEND must be 's3' (the Render filesystem is ephemeral)")
-        elif not (self.s3_bucket and self.s3_access_key_id and self.s3_secret_access_key):
-            problems.append("S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required")
+        if self.storage_backend != "local":
+            problems.append("STORAGE_BACKEND must be 'local' when using the Render persistent disk")
+        if not self.local_storage_dir:
+            problems.append("LOCAL_STORAGE_DIR must be set")
         if not self.cors_origins:
             problems.append("CORS_ORIGINS must list the deployed www, apply and board origins")
         elif any(not origin.startswith("https://") for origin in self.cors_origins):

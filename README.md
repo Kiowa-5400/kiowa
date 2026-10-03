@@ -22,7 +22,7 @@ All business rules (eligibility, review, payments, renewal cycle, consent) live 
 
 **Accounts.** One login per person. Board access is a role on top of it (technology administrator, president, vice president, treasurer, board member; see `backend/app/core/permissions.py`). Sessions are HttpOnly cookies with a CSRF header, 8-hour sessions (30 days with "keep me signed in"), and an account lockout after 8 failed attempts.
 
-**Files.** Uploads are checked by size, extension and actual file contents, then stored in a private S3-compatible bucket. Private documents are only served to their owner or the board, and every board view is logged.
+**Files.** Uploads are checked by size, extension and actual file contents, then stored on the API's private Render persistent disk. Private documents are only served to their owner or the board, and every board view is logged.
 
 ## Local development
 
@@ -52,7 +52,7 @@ npm run typecheck      # all three apps
 npm run build          # typecheck + production build of all three apps
 ```
 
-The backend suite covers registration, login, logout, lockout, password reset, roles, CSRF, CORS, application submission, uploads and file-signature checks, document authorization and review, approval, eligibility, Stripe webhook signatures/idempotency/refunds/reconciliation, calendar and recurrence, matches and photos, CMS sanitization, contacts and filtering, exports, email/SMS campaigns with analytics webhooks, SMS consent, renewal reminders, termination sweep, and the audit log. It includes end-to-end renewal and waiting-list flows through payment.
+The backend suite covers registration, login, logout, lockout, password reset, roles, CSRF, CORS, application submission, uploads and file-signature checks, document authorization and review, approval, eligibility, Stripe webhook signatures/idempotency/refunds/reconciliation, calendar and recurrence, matches and photos, CMS sanitization, contacts and filtering, exports, email/SMS campaigns with first-party campaign tracking and consent handling, SMS consent, renewal reminders, termination sweep, and the audit log. It includes end-to-end renewal and waiting-list flows through payment.
 
 ## Database changes
 

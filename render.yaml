@@ -27,21 +27,13 @@ envVarGroups:
         value: https://board.kiowagunclub.org
       - key: API_PUBLIC_URL
         value: https://api.kiowagunclub.org
-      # "board" keeps the site in private preview (board sign-in required). Change to "public" at launch.
+      # Public production launch.
       - key: SITE_ACCESS
-        value: board
+        value: public
       - key: STORAGE_BACKEND
-        value: s3
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_REGION
-        sync: false
-      - key: S3_ENDPOINT_URL
-        sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
+        value: local
+      - key: LOCAL_STORAGE_DIR
+        value: /var/data/kiowa-storage
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -59,12 +51,8 @@ envVarGroups:
       - key: EMAIL_REPLY_TO
         sync: false
       - key: SMS_PROVIDER
-        value: twilio
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
+        value: gateway
+      - key: VERIPHONE_API_KEY
         sync: false
       - key: CRON_SECRET
         generateValue: true
@@ -86,8 +74,13 @@ services:
     buildCommand: pip install -r requirements.txt
     # Runs before each deploy goes live; a failed migration stops the deploy.
     preDeployCommand: alembic upgrade head && python -m app.cli bootstrap-admin
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2 --proxy-headers --forwarded-allow-ips '*' --no-server-header
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips '*' --no-server-header
     healthCheckPath: /health
+    numInstances: 1
+    disk:
+      name: kiowa-storage
+      mountPath: /var/data/kiowa-storage
+      sizeGB: 10
     envVars:
       - fromGroup: kiowa-shared
       - key: DATABASE_URL
