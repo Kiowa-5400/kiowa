@@ -18,6 +18,7 @@ alembic==1.20.0
 # Security
 argon2-cffi==25.1.0
 nh3==0.3.7
+cryptography==46.0.3
 
 # Integrations: Stripe, HTTP (Resend / Veriphone)
 stripe==16.0.0
