@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import html
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -399,46 +397,60 @@ def unsubscribe(token: str = Query(min_length=8, max_length=64), db: Session = D
     return Message(message="You've been unsubscribed from Kiowa Gun Club emails. Account and dues notices will still be sent.")
 
 
-@webhook_router.post("/sms/telnyx")
-async def telnyx_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    """Record Telnyx message delivery/failure events idempotently."""
-    import json
-    payload = json.loads(await request.body())
-    data = payload.get("data") or {}
-    event_id = str(data.get("id") or "")
-    event_type = str(data.get("event_type") or "")
-    if not event_id:
+@webhook_router.post("/sms/twilio")
+async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Record Twilio SMS/MMS delivery status callbacks idempotently."""
+    from twilio.request_validator import RequestValidator
+    form = await request.form()
+    params = {str(k): str(v) for k, v in form.items()}
+    signature = request.headers.get("X-Twilio-Signature", "")
+    settings = get_settings()
+    if not settings.twilio_auth_token:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Twilio webhook is not configured.")
+    validator = RequestValidator(settings.twilio_auth_token)
+    if not signature or not validator.validate(str(request.url), params, signature):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
+
+    message_id = params.get("MessageSid") or ""
+    message_status = (params.get("MessageStatus") or "").lower()
+    error_code = params.get("ErrorCode") or None
+    if not message_id or not message_status:
         return {"status": "ignored"}
+
+    event_id = f"{message_id}:{message_status}:{error_code or ''}"
     from app.models import SmsProviderEvent
     if db.get(SmsProviderEvent, event_id):
         return {"status": "duplicate"}
-    db.add(SmsProviderEvent(id=event_id, event_type=event_type))
-    payload_data = data.get("payload") or {}
-    message_id = payload_data.get("id")
-    if not message_id:
-        db.commit()
-        return {"status": "ignored"}
+
+    db.add(SmsProviderEvent(id=event_id, event_type=f"message.{message_status}"))
     recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
     if recipient is None:
         db.commit()
         return {"status": "unknown message"}
-    when = _parse_time(payload.get("occurred_at")) or now_utc()
-    if event_type in {"message.sent", "message.queued"}:
+
+    when = now_utc()
+    if message_status in {"queued", "accepted"}:
+        recipient.status = "queued"
+    elif message_status in {"sending", "sent"}:
         recipient.status = "sent"
         recipient.sent_at = recipient.sent_at or when
-    elif event_type == "message.delivered":
+    elif message_status == "delivered":
         recipient.status = "delivered"
         recipient.delivered_at = recipient.delivered_at or when
-    elif event_type in {"message.failed", "message.finalized"}:
+    elif message_status == "undelivered":
         recipient.status = "undelivered"
         recipient.failed_at = recipient.failed_at or when
-        errors = payload_data.get("errors") or []
-        if errors:
-            recipient.error_code = str(errors[0].get("code") or errors[0].get("title") or "")[:80] or None
-            recipient.error = str(errors[0].get("detail") or errors[0].get("title") or "")[:2000] or None
+        recipient.error_code = error_code[:80] if error_code else None
+        recipient.error = params.get("ErrorMessage") or recipient.error
+    elif message_status == "failed":
+        recipient.status = "failed"
+        recipient.failed_at = recipient.failed_at or when
+        recipient.error_code = error_code[:80] if error_code else None
+        recipient.error = params.get("ErrorMessage") or recipient.error
     else:
         db.commit()
         return {"status": "ignored"}
+
     db.commit()
     return {"status": "recorded"}
 
