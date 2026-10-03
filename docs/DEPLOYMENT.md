@@ -1,13 +1,12 @@
-# Deploying to Render
+# Deploying
 
-Everything is described in [`render.yaml`](../render.yaml) (a Render Blueprint):
+The API, database and daily jobs run on Render, described in [`render.yaml`](../render.yaml) (a Render Blueprint). The four React apps are static sites on Cloudflare Pages (see [Cloudflare Pages](#4-cloudflare-pages) below).
 
 | Service | Type | What runs |
 |---|---|---|
 | `kiowa-db` | PostgreSQL 16 | The database |
 | `kiowa-api` | Web service (Python) | `uvicorn app.main:app` with 1 worker and a 10 GB persistent disk; health check `/health`; pre-deploy `alembic upgrade head && python -m app.cli bootstrap-admin` |
 | `kiowa-daily-jobs` | Cron job | `python -m app.jobs daily` at 13:00 UTC (8 AM CDT / 7 AM CST) |
-| `kiowa-www`, `kiowa-portal`, `kiowa-apply`, `kiowa-board` | Static sites | `npm ci && npm run build` with security headers and an SPA rewrite |
 
 ## 1. Before the first deploy
 
@@ -17,7 +16,7 @@ Everything is described in [`render.yaml`](../render.yaml) (a Render Blueprint):
 4. **Email (Resend).** Verify `kiowagunclub.org` as a sending domain in Resend, create an API key, and add a webhook to `https://api.kiowagunclub.org/api/webhooks/email/resend` for delivered, opened, clicked, bounced and complained events. Copy its signing secret.
 5. **Texts (Twilio).** Create a Twilio Messaging Service, add the club's Twilio sender/phone number, complete the required U.S. messaging registration, and copy the Account SID, Auth Token and Messaging Service SID. Kiowa sends SMS/MMS through the Messaging Service and posts each message's delivery-status callback to `https://api.kiowagunclub.org/api/webhooks/sms/twilio`.
 
-## 2. Create the Blueprint
+## 2. Create the Render Blueprint
 
 In Render: **New → Blueprint**, then choose this repository. Render asks for every `sync: false` value:
 
@@ -49,6 +48,26 @@ The API refuses to start in production without PostgreSQL, a strong `SECRET_KEY`
 | `purge-sessions` | Deletes expired sessions | Yes |
 
 Run one by hand from the `kiowa-daily-jobs` or `kiowa-api` shell: `python -m app.jobs renewal-reminders`. You can also trigger jobs over HTTP: `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://api.kiowagunclub.org/api/jobs/daily`.
+
+## 4. Cloudflare Pages
+
+Each app is its own Pages project connected to this repository:
+
+| Pages project | Root directory | Custom domain | Environment variables |
+|---|---|---|---|
+| www | `apps/www` | `kiowagunclub.org` (and `www.`) | `VITE_API_BASE_URL`, `VITE_PORTAL_APP_URL`, `VITE_APPLY_APP_URL`, `VITE_BOARD_APP_URL` |
+| portal | `apps/portal` | `portal.kiowagunclub.org` | `VITE_API_BASE_URL`, `VITE_WWW_URL`, `VITE_PORTAL_APP_URL`, `VITE_APPLY_APP_URL` |
+| apply | `apps/apply` | `apply.kiowagunclub.org` | `VITE_API_BASE_URL`, `VITE_WWW_URL`, `VITE_PORTAL_APP_URL`, `VITE_APPLY_APP_URL` |
+| board | `apps/board` | `board.kiowagunclub.org` | `VITE_API_BASE_URL`, `VITE_WWW_URL`, `VITE_APPLY_APP_URL` |
+
+For every project:
+
+- **Build command** `npm ci && npm run build`, **output directory** `dist`. Pages clones the whole repository, so `apps/shared` is available to the build.
+- **Environment variables** are the production URLs: `VITE_API_BASE_URL=https://api.kiowagunclub.org`, `VITE_WWW_URL=https://kiowagunclub.org`, `VITE_PORTAL_APP_URL=https://portal.kiowagunclub.org`, `VITE_APPLY_APP_URL=https://apply.kiowagunclub.org`, `VITE_BOARD_APP_URL=https://board.kiowagunclub.org`. Vite builds them into the bundle; a missing one falls back to `localhost`. Changing one needs a redeploy.
+- **Node version** comes from each app's `.node-version` (Vite 8 needs 22.12+).
+- **Security headers** (CSP, HSTS, etc.) and long-lived caching for `/assets/*` come from each app's `public/_headers`. If the API domain changes, update the CSP there.
+- **SPA routing** needs no configuration: with no `404.html`, Pages serves `index.html` for unknown paths.
+- **Use the custom domain**, not `*.pages.dev`. The API only accepts the origins in `CORS_ORIGINS`, and its session cookies are only sent between sites under `kiowagunclub.org`.
 
 ## 5. Monitoring
 
