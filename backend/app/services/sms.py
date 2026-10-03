@@ -113,19 +113,47 @@ class VeriphoneLookup:
 
 class SmsProvider(Protocol):
     name: str
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult: ...
 
-    def send(self, person: Person, body: str) -> SmsResult: ...
+
+class TelnyxSmsProvider:
+    """Telnyx Messaging API provider. Delivery is finalized by the Telnyx webhook."""
+    name = "telnyx"
+
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
+        number = to_e164(person.phone)
+        if not number:
+            return SmsResult("failed", "No valid 10-digit mobile number on file.")
+        settings = get_settings()
+        payload: dict[str, object] = {"from": settings.telnyx_from_number, "to": number, "text": body}
+        if settings.telnyx_messaging_profile_id:
+            payload["messaging_profile_id"] = settings.telnyx_messaging_profile_id
+        if media_url:
+            payload["media_urls"] = [media_url]
+        try:
+            response = httpx.post(
+                "https://api.telnyx.com/v2/messages",
+                headers={"Authorization": f"Bearer {settings.telnyx_api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=20,
+            )
+        except httpx.HTTPError as exc:
+            return SmsResult("failed", f"Telnyx request failed: {exc}")
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("errors") or response.text
+            except ValueError:
+                detail = response.text
+            return SmsResult("failed", f"Telnyx rejected message ({response.status_code}): {detail}")
+        data = response.json().get("data") or {}
+        return SmsResult("sent", None, None, data.get("id"))
 
 
 class GatewaySmsProvider:
-    """Veriphone carrier lookup (cached on the person) + the club mailbox SMTP server to the carrier gateway."""
-
     name = "gateway"
-
     def __init__(self, lookup: CarrierLookup) -> None:
         self.lookup = lookup
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         digits = ten_digits(person.phone)
         if not digits:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
@@ -133,7 +161,6 @@ class GatewaySmsProvider:
             carrier, error = self.lookup.lookup(f"+1{digits}")
             if not carrier:
                 return SmsResult("failed", error)
-            # Saved with the caller's transaction; cleared whenever the phone number changes.
             person.sms_carrier = carrier[:120]
         domain = gateway_domain_for_carrier(person.sms_carrier)
         if not domain:
@@ -151,14 +178,10 @@ class GatewaySmsProvider:
 
 
 class ConsoleSmsProvider:
-    """Development/test provider: records texts instead of sending them."""
-
     name = "console"
-
     def __init__(self) -> None:
         self.outbox: list[tuple[str, str]] = []
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         number = to_e164(person.phone)
         if not number:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
@@ -169,14 +192,18 @@ class ConsoleSmsProvider:
 
 class DisabledSmsProvider:
     name = "disabled"
-
-    def send(self, person: Person, body: str) -> SmsResult:
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
         return SmsResult("failed", "Text messaging is not configured.")
 
 
 @lru_cache(maxsize=1)
 def get_sms_provider() -> SmsProvider:
     settings = get_settings()
+    if settings.sms_provider == "telnyx":
+        if not settings.telnyx_api_key or not settings.telnyx_from_number:
+            logger.error("sms_provider_misconfigured", extra={"detail": "TELNYX_API_KEY/TELNYX_FROM_NUMBER missing"})
+            return DisabledSmsProvider()
+        return TelnyxSmsProvider()
     if settings.sms_provider == "gateway":
         if not settings.veriphone_api_key:
             logger.error("sms_provider_misconfigured", extra={"detail": "VERIPHONE_API_KEY missing"})
@@ -191,11 +218,11 @@ class ConsentError(Exception):
     pass
 
 
-def send_to_person(person: Person, body: str) -> SmsResult:
+def send_to_person(person: Person, body: str, media_url: str | None = None) -> SmsResult:
     """The only path to an outgoing text. Refuses anyone without recorded consent."""
     if not person.sms_opt_in or person.sms_opt_in_at is None:
         raise ConsentError("This person has not opted in to text messages.")
-    return get_sms_provider().send(person, body)
+    return get_sms_provider().send(person, body, media_url)
 
 
 # ---------------------------------------------------------------------------
