@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.models import Application, AuditLog, Document, Payment, Person
 from app.services import payments as payment_service
 from tests.conftest import email_outbox, sms_outbox
@@ -281,6 +282,12 @@ def _approved(api, new_api, db, email="pay@example.com"):
     board(reviewer, db, f"board-{email}")
     reviewer.post(f"/api/board/applications/{application['id']}/approve", json={"verify_nra": True})
     return application, reviewer
+
+
+def test_payments_mode_reports_stripe_test_key(api, monkeypatch):
+    assert api.get("/api/payments/mode").json() == {"test_mode": True}
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_live_example")
+    assert api.get("/api/payments/mode").json() == {"test_mode": False}
 
 
 def test_checkout_uses_server_side_amount_and_metadata(api, new_api, db, gateway):

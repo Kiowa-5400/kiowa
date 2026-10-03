@@ -327,6 +327,12 @@ def download_my_document(document_id: int, auth: MemberAuth = Depends(require_me
 # ---------------------------------------------------------------------------
 
 
+@router.get("/payments/mode")
+def payments_mode() -> dict[str, bool]:
+    """Lets the pay page warn members while Stripe is still on a test key."""
+    return {"test_mode": get_settings().stripe_test_mode}
+
+
 @router.post("/applications/{application_id}/checkout")
 def start_checkout(application_id: int, request: Request, auth: MemberAuth = Depends(require_verified_member),
                    db: Session = Depends(get_db)) -> dict[str, str]:

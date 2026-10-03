@@ -286,6 +286,7 @@ export function PayPage({ id }: { id: number }) {
   usePageTitle('Pay dues');
   const { query } = useLocation();
   const application = useAsync((signal) => api<Application>(`/api/applications/${id}`, { signal }), [id]);
+  const mode = useAsync((signal) => api<{ test_mode: boolean }>('/api/payments/mode', { signal }), []);
   const checkout = useAction(async () => {
     const { checkout_url } = await api<{ checkout_url: string }>(`/api/applications/${id}/checkout`, { method: 'POST' });
     window.location.assign(checkout_url);
@@ -299,6 +300,11 @@ export function PayPage({ id }: { id: number }) {
     <section className="card stack pay-card" aria-labelledby="pay-heading">
       <p className="kicker">{application_type === 'renewal' ? 'Membership renewal' : 'New membership'}</p>
       <h1 id="pay-heading">Pay your dues</h1>
+      {mode.data?.test_mode && (
+        <Alert kind="warning" title="Test mode">
+          Online payments are still being tested. No real charge will be made, and a payment here won't count toward your dues.
+        </Alert>
+      )}
       {query.get('cancelled') && <Alert kind="info">Payment was cancelled. Nothing was charged. You can try again whenever you're ready.</Alert>}
       {application.data.payment_status === 'paid' ? (
         <Alert kind="success">These dues are already paid. Thank you!</Alert>

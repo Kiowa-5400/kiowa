@@ -157,6 +157,11 @@ class Settings(BaseSettings):
     def stripe_configured(self) -> bool:
         return bool(self.stripe_secret_key and self.stripe_webhook_secret)
 
+    @property
+    def stripe_test_mode(self) -> bool:
+        """Stripe keys carry their mode in the prefix (sk_test_/rk_test_ vs sk_live_/rk_live_)."""
+        return self.stripe_secret_key.startswith(("sk_test_", "rk_test_"))
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
