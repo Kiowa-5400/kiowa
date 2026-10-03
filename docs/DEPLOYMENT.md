@@ -15,7 +15,7 @@ Everything is described in [`render.yaml`](../render.yaml) (a Render Blueprint):
 2. **Render storage.** The production API uses the paid Render persistent disk mounted at `/var/data/kiowa-storage`. Keep the API at one instance; the disk is attached to that instance.
 3. **Stripe.** In the Stripe Dashboard, add `https://api.kiowagunclub.org/api/webhooks/stripe` for the configured checkout events and copy the signing secret/API key.
 4. **Email (Resend).** Verify `kiowagunclub.org` as a sending domain in Resend, create an API key, and add a webhook to `https://api.kiowagunclub.org/api/webhooks/email/resend` for delivered, opened, clicked, bounced and complained events. Copy its signing secret.
-5. **Texts.** The current production SMS path remains the Veriphone carrier email-to-SMS gateway, using Resend to send the carrier-gateway email. No Twilio configuration is required.
+5. **Texts (Twilio).** Create a Twilio Messaging Service, add the club's Twilio sender/phone number, complete the required U.S. messaging registration, and copy the Account SID, Auth Token and Messaging Service SID. Kiowa sends SMS/MMS through the Messaging Service and posts each message's delivery-status callback to `https://api.kiowagunclub.org/api/webhooks/sms/twilio`.
 
 ## 2. Create the Blueprint
 
@@ -25,7 +25,8 @@ In Render: **New → Blueprint**, then choose this repository. Render asks for e
 |---|---|
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | From Stripe |
 | `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_TO` | From Resend/domain setup |
-| `VERIPHONE_API_KEY` | From Veriphone |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID` | From Twilio |
+| `VERIPHONE_API_KEY` | Only needed if the legacy carrier-gateway fallback is enabled |
 | `SENTRY_DSN` | Optional, for error monitoring |
 | `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_PASSWORD` | The first administrator |
 
