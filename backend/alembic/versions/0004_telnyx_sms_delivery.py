@@ -1,4 +1,4 @@
-"""Add Telnyx delivery analytics fields and provider event idempotency.
+"""Add SMS delivery analytics fields and provider event idempotency.
 
 Revision ID: 0004
 Revises: 0003
