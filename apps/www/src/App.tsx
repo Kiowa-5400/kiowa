@@ -59,8 +59,8 @@ export function App() {
             {NAV.map((item) => (
               <Link key={item.to} to={item.to} aria-current={path === item.to ? 'page' : undefined}>{item.label}</Link>
             ))}
-            <a href={`${site.portal_url}/login`}>Member login</a>
-            <a className="btn btn-primary btn-sm nav-cta" href={`${site.apply_url}/`}>Renew or apply</a>
+            <a href={`${site.portal_url}`}>Member login</a>
+            <a className="btn btn-primary btn-sm nav-cta" href={`${site.apply_url}`}>Renew or apply</a>
           </nav>
         </div>
       </header>
