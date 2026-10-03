@@ -3,10 +3,11 @@ import { api } from '@shared/api';
 import { formatDate, formatDateTime, formatMoney, STATUS_LABELS, titleCase } from '@shared/format';
 import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, Empty, ErrorState, FormErrors, Loading, TextField, useAction, useAsync } from '@shared/ui';
-import { useAuth, useProfile } from '../auth';
-import { DocumentUpload } from '../components/DocumentUpload';
-import { ProfileFields, profileForm, profilePayload, type ProfileForm } from '../components/ProfileFields';
-import type { Application, PaymentSummary, Profile, UploadedDocument } from '../types';
+import { useAuth, useProfile } from '@shared/member/auth';
+import { DocumentUpload } from '@shared/member/DocumentUpload';
+import { ProfileFields, profileForm, profilePayload, type ProfileForm } from '@shared/member/ProfileFields';
+import type { Application, PaymentSummary, Profile, UploadedDocument } from '@shared/member/types';
+import { applyUrl } from '@shared/member/urls';
 
 const OPEN = ['draft', 'submitted', 'needs_info', 'approved'];
 
@@ -52,7 +53,7 @@ export function DashboardPage() {
             <>
               <p>Status: <strong>{open.status_label}</strong></p>
               {open.status === 'draft' || open.status === 'needs_info'
-                ? <Link className="btn btn-primary" to="/apply?step=1">Continue my application</Link>
+                ? <a className="btn btn-primary" href={applyUrl({ step: 1 })}>Continue my application</a>
                 : open.eligibility.eligible
                   ? <Link className="btn btn-primary" to={`/applications/${open.id}/pay`}>Pay dues ({formatMoney(open.eligibility.amount)})</Link>
                   : <Link className="btn" to={`/applications/${open.id}`}>View my application</Link>}
@@ -63,9 +64,9 @@ export function DashboardPage() {
               <p className="muted">
                 {profile.membership_status === 'member' ? 'Renew your membership for the coming year.' : 'Join the waiting list to become a member.'}
               </p>
-              <Link className="btn btn-primary" to={`/apply?type=${profile.membership_status === 'member' || profile.membership_status === 'expired' ? 'renewal' : 'waiting_list'}`}>
+              <a className="btn btn-primary" href={applyUrl({ type: profile.membership_status === 'member' || profile.membership_status === 'expired' ? 'renewal' : 'waiting_list' })}>
                 {profile.membership_status === 'member' || profile.membership_status === 'expired' ? 'Renew my membership' : 'Apply for the waiting list'}
-              </Link>
+              </a>
             </>
           )}
         </section>
@@ -254,7 +255,7 @@ export function ApplicationPage({ id }: { id: number }) {
         {a.status === 'needs_info' && a.info_request_message && <Alert kind="warning" title="From the board:">{a.info_request_message}</Alert>}
         {a.status === 'declined' && a.decision_reason && <p className="muted">{a.decision_reason}</p>}
         <div className="row">
-          {(a.status === 'draft' || a.status === 'needs_info') && <Link className="btn btn-primary" to="/apply?step=1">{a.status === 'draft' ? 'Finish my application' : 'Update and resubmit'}</Link>}
+          {(a.status === 'draft' || a.status === 'needs_info') && <a className="btn btn-primary" href={applyUrl({ step: 1 })}>{a.status === 'draft' ? 'Finish my application' : 'Update and resubmit'}</a>}
           {a.eligibility.eligible && <Link className="btn btn-primary" to={`/applications/${a.id}/pay`}>Pay dues ({formatMoney(a.eligibility.amount)})</Link>}
           {['draft', 'submitted', 'needs_info'].includes(a.status) && (
             <button type="button" className="btn btn-danger" disabled={withdraw.busy} onClick={() => void withdraw.run()}>Withdraw application</button>

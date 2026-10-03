@@ -1,4 +1,4 @@
-/* Member portal and application layout. Colors come from apps/shared/tokens.css. */
+/* Member portal and application layout (apps/portal, apps/apply). Colors come from apps/shared/tokens.css. */
 
 .app-header { background: var(--color-header); border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
 .app-brand { color: var(--color-text); font-weight: 800; font-size: 1.15rem; text-decoration: none; }

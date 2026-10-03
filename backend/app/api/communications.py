@@ -68,7 +68,7 @@ def _summary(audience: Audience, db: Session) -> str:
 
 def unsubscribe_links(person: Person) -> tuple[str, str]:
     settings = get_settings()
-    page = f"{settings.apply_app_url.rstrip('/')}/unsubscribe?token={person.unsubscribe_token}"
+    page = f"{settings.portal_app_url.rstrip('/')}/unsubscribe?token={person.unsubscribe_token}"
     one_click = f"{settings.api_public_url.rstrip('/')}/api/public/unsubscribe?token={person.unsubscribe_token}"
     return page, one_click
 

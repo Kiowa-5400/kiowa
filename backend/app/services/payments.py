@@ -137,7 +137,7 @@ def start_checkout(db: Session, application: Application, person: Person, contex
     )
     db.add(payment)
     db.flush()
-    apply_url = settings.apply_app_url.rstrip("/")
+    portal_url = settings.portal_app_url.rstrip("/")
     session = gateway.create_checkout_session(
         {
             "mode": "payment",
@@ -163,8 +163,8 @@ def start_checkout(db: Session, application: Application, person: Person, contex
             "payment_intent_data": {
                 "metadata": {"payment_id": str(payment.id), "application_id": str(application.id)},
             },
-            "success_url": f"{apply_url}/payments/return?session_id={{CHECKOUT_SESSION_ID}}",
-            "cancel_url": f"{apply_url}/applications/{application.id}/pay?cancelled=1",
+            "success_url": f"{portal_url}/payments/return?session_id={{CHECKOUT_SESSION_ID}}",
+            "cancel_url": f"{portal_url}/applications/{application.id}/pay?cancelled=1",
         },
         idempotency_key=f"kgc-checkout-{payment.id}",
     )

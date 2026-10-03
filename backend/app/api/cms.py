@@ -105,6 +105,7 @@ class SiteOut(BaseModel):
     images: dict[str, str | None]
     image_alt: dict[str, str | None]
     apply_url: str
+    portal_url: str
     rules_version: str
 
 
@@ -127,6 +128,7 @@ def _site_out(db: Session) -> SiteOut:
         images={key: image_url(images[key]) if key in images else None for key in SITE_IMAGE_KEYS},
         image_alt={key: images[key].alt_text if key in images else None for key in SITE_IMAGE_KEYS},
         apply_url=get_settings().apply_app_url,
+        portal_url=get_settings().portal_app_url,
         rules_version=row.rules_version,
     )
 

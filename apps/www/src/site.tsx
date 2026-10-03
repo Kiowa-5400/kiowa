@@ -20,6 +20,7 @@ export type Site = {
   images: Record<string, string | null>;
   image_alt: Record<string, string | null>;
   apply_url: string;
+  portal_url: string;
   rules_version: string;
 };
 
@@ -48,6 +49,7 @@ const FALLBACK: Site = {
   images: {},
   image_alt: {},
   apply_url: import.meta.env.VITE_APPLY_APP_URL || 'http://localhost:5173',
+  portal_url: import.meta.env.VITE_PORTAL_APP_URL || 'http://localhost:5174',
   rules_version: '',
 };
 

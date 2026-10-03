@@ -1,6 +1,6 @@
 """Sign-in, registration, password and email-verification flows.
 
-Member realm: /api/auth/*  (apply app / member portal)
+Member realm: /api/auth/*  (member portal and application apps)
 Board realm:  /api/board/auth/*  (board app)
 Both realms share one credential per person and one set of reset links.
 """
@@ -91,7 +91,7 @@ class BoardSessionOut(BaseModel):
 
 def _link(app: str, path: str, token: str) -> str:
     settings = get_settings()
-    base = settings.board_app_url if app == "board" else settings.apply_app_url
+    base = settings.board_app_url if app == "board" else settings.portal_app_url
     return f"{base.rstrip('/')}{path}?token={token}"
 
 
@@ -103,7 +103,7 @@ def send_verification_email(db: Session, person: Person) -> None:
         "Verify your email for the Kiowa Gun Club member portal",
         f"<p>Hi {html.escape(person.first_name)},</p><p>Please confirm this is your email address to finish setting up "
         f"your Kiowa Gun Club account.</p>"
-        + email_service.button(_link("apply", "/verify-email", token), "Verify my email")
+        + email_service.button(_link("portal", "/verify-email", token), "Verify my email")
         + "<p>This link expires in 24 hours. If you didn't create an account, you can ignore this message.</p>",
     )
 
@@ -178,7 +178,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Message
             if existing.password_hash
             else "The club already has your contact information on file. Use the link below to set a password and access the member portal."
         )
-        send_password_link(db, existing, "apply", intro=intro)
+        send_password_link(db, existing, "portal", intro=intro)
     return Message(message=GENERIC_REGISTER)
 
 
@@ -210,7 +210,7 @@ def session(auth: MemberAuth = Depends(require_member), db: Session = Depends(ge
 def forgot_password(payload: EmailOnly, db: Session = Depends(get_db)) -> Message:
     person = auth_service.find_person_by_email(db, payload.email)
     if person is not None and not auth_service.recently_issued(db, person, "password_reset"):
-        send_password_link(db, person, "apply", intro="We received a request to reset the password on your Kiowa Gun Club account.")
+        send_password_link(db, person, "portal", intro="We received a request to reset the password on your Kiowa Gun Club account.")
     return Message(message=GENERIC_RESET)
 
 

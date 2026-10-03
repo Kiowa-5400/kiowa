@@ -1,61 +1,47 @@
-import type { ReactNode } from 'react';
-import { Link, matchPath, navigate, useLocation } from '@shared/router';
+import { useEffect } from 'react';
+import { navigate, useLocation } from '@shared/router';
 import { Loading } from '@shared/ui';
-import { useAuth } from './auth';
-import {
-  ForgotPasswordPage,
-  LoginPage,
-  RegisterPage,
-  ResetPasswordPage,
-  UnsubscribePage,
-  VerifyEmailPage,
-} from './pages/AccountPages';
+import { useAuth } from '@shared/member/auth';
+import { PORTAL_URL, WWW_URL, portalLoginUrl } from '@shared/member/urls';
 import { ApplyWizard } from './pages/ApplyWizard';
-import { ApplicationPage, DashboardPage, PayPage, PaymentReturnPage, ProfilePage } from './pages/PortalPages';
 
-const WWW_URL: string = import.meta.env.VITE_WWW_URL || 'http://localhost:4173';
-
-/** Routes that work without signing in. */
-const PUBLIC_ROUTES: Record<string, () => ReactNode> = {
-  '/login': () => <LoginPage />,
-  '/register': () => <RegisterPage />,
-  '/verify-email': () => <VerifyEmailPage />,
-  '/forgot-password': () => <ForgotPasswordPage />,
-  '/reset-password': () => <ResetPasswordPage />,
-  '/unsubscribe': () => <UnsubscribePage />,
-};
-
-function memberRoute(path: string): ReactNode {
-  if (path === '/') return <DashboardPage />;
-  if (path === '/profile') return <ProfilePage />;
-  if (path === '/apply') return <ApplyWizard />;
-  // Link used in renewal reminder emails.
-  if (path === '/renew') {
-    navigate('/apply?type=renewal', { replace: true });
-    return null;
-  }
-  if (path === '/payments/return') return <PaymentReturnPage />;
-  const pay = matchPath('/applications/:id/pay', path);
-  if (pay) return <PayPage id={Number(pay.id)} />;
-  const application = matchPath('/applications/:id', path);
-  if (application) return <ApplicationPage id={Number(application.id)} />;
-  return (
-    <section className="card stack">
-      <h1>Page not found</h1>
-      <Link to="/">Go to my membership</Link>
-    </section>
-  );
+/** Full-page redirect to another site (the member portal). */
+function LeaveTo({ href }: { href: string }) {
+  useEffect(() => window.location.replace(href), [href]);
+  return <Loading />;
 }
 
+/** In-app redirect, done after render. */
+function GoTo({ to }: { to: string }) {
+  useEffect(() => navigate(to, { replace: true }), [to]);
+  return null;
+}
+
+/**
+ * apply.kiowagunclub.org is only the application form, served at "/".
+ * Signing in, account pages, application status and payment live on the
+ * member portal; any other path here is forwarded there.
+ */
 export function App() {
   const { path, query } = useLocation();
   const { profile, checking, signOut } = useAuth();
 
-  let content: ReactNode;
-  if (checking) content = <Loading />;
-  else if (PUBLIC_ROUTES[path]) content = PUBLIC_ROUTES[path]();
-  else if (!profile) content = <LoginPage next={path === '/' ? undefined : `${path}?${query.toString()}`} />;
-  else content = memberRoute(path);
+  let content;
+  if (path === '/apply' || path === '/renew') {
+    // Older links: apply.kiowagunclub.org/apply?type=… and the renewal-reminder /renew link.
+    const params = new URLSearchParams(query);
+    if (path === '/renew') params.set('type', 'renewal');
+    const search = params.toString();
+    content = <GoTo to={search ? `/?${search}` : '/'} />;
+  } else if (path !== '/') {
+    content = <LeaveTo href={`${PORTAL_URL}${path}${window.location.search}${window.location.hash}`} />;
+  } else if (checking) {
+    content = <Loading />;
+  } else if (!profile) {
+    content = <LeaveTo href={portalLoginUrl(window.location.href)} />;
+  } else {
+    content = <ApplyWizard />;
+  }
 
   return (
     <>
@@ -63,20 +49,13 @@ export function App() {
       <header className="app-header">
         <div className="container row-between">
           <a className="app-brand" href={WWW_URL}>Kiowa Gun Club</a>
-          <nav className="row" aria-label="Member menu">
-            {profile ? (
-              <>
-                <Link to="/" aria-current={path === '/' ? 'page' : undefined}>My membership</Link>
-                <Link to="/profile" aria-current={path === '/profile' ? 'page' : undefined}>My information</Link>
-                <button type="button" className="btn btn-sm" onClick={() => void signOut().then(() => navigate('/login'))}>Sign out</button>
-              </>
-            ) : (
-              <>
-                <Link to="/login">Member login</Link>
-                <Link to="/register">Set up your account</Link>
-              </>
-            )}
-          </nav>
+          {profile && (
+            <nav className="row" aria-label="Member menu">
+              <a href={`${PORTAL_URL}/`}>My membership</a>
+              <a href={`${PORTAL_URL}/profile`}>My information</a>
+              <button type="button" className="btn btn-sm" onClick={() => void signOut().then(() => window.location.assign(`${PORTAL_URL}/login`))}>Sign out</button>
+            </nav>
+          )}
         </div>
       </header>
       <main id="main" className="container app-main" tabIndex={-1}>{content}</main>

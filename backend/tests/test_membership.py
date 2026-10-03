@@ -292,6 +292,9 @@ def test_checkout_uses_server_side_amount_and_metadata(api, new_api, db, gateway
     assert session["params"]["line_items"][0]["price_data"]["unit_amount"] == 15000
     assert session["params"]["metadata"]["application_id"] == str(application["id"])
     assert "{CHECKOUT_SESSION_ID}" in session["params"]["success_url"]
+    # Stripe returns members to the portal, not the application form.
+    assert session["params"]["success_url"].startswith("http://localhost:5174/payments/return")
+    assert session["params"]["cancel_url"] == f"http://localhost:5174/applications/{application['id']}/pay?cancelled=1"
     payment = db.scalar(select(Payment))
     assert payment.status == "pending" and payment.stripe_checkout_session_id == session["id"]
     # Returning from Stripe changes nothing: still pending until the webhook.

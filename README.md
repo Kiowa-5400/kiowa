@@ -5,10 +5,11 @@ Website, member portal and board administration for the Kiowa Gun Club (Great Be
 | Part | What it is | Local URL |
 |---|---|---|
 | `apps/www` | Public website: home, matches, calendar, about, rules, membership, contact | http://localhost:4173 |
-| `apps/apply` | Member portal: account, profile, renewals, waiting-list applications, document uploads, dues payment | http://localhost:5173 |
+| `apps/portal` | Member portal (portal.kiowagunclub.org): sign in, account setup, email verification, password reset, profile, application status, document uploads, dues payment, unsubscribe | http://localhost:5174 |
+| `apps/apply` | Membership application form (apply.kiowagunclub.org): renewal or waiting-list application, served at `/`; signs in through the portal | http://localhost:5173 |
 | `apps/board` | Board administration: applications, members, documents, payments, website text & photos, calendar, matches, email, texts, board users, settings, activity log | http://localhost:4174 |
 | `backend` | FastAPI API, PostgreSQL (SQLAlchemy + Alembic), scheduled jobs | http://localhost:8000 (`/docs` in development) |
-| `apps/shared` | Code shared by the three React apps: design tokens, API client, router, formatting, UI components | — |
+| `apps/shared` | Code shared by the React apps: design tokens, API client, router, formatting, UI components; `apps/shared/member` holds the member session, types, form pieces and styles used by both the portal and apply apps | — |
 
 All business rules (eligibility, review, payments, renewal cycle, consent) live in the API. The React apps only display what the API returns.
 
@@ -32,13 +33,13 @@ Requirements: Python 3.12, Node 22.12+, PostgreSQL 16 (or let the tests start an
 npm install            # root tooling (concurrently)
 npm run install:all    # each app's node_modules + backend/.venv
 cp backend/.env.example backend/.env          # then set DATABASE_URL
-cp apps/www/.env.example apps/www/.env        # same for apps/apply and apps/board
+cp apps/www/.env.example apps/www/.env        # same for apps/portal, apps/apply and apps/board
 
 npm run db:migrate     # create tables and seed the club's content
 BOOTSTRAP_ADMIN_EMAIL=you@example.com BOOTSTRAP_ADMIN_NAME="Your Name" BOOTSTRAP_ADMIN_PASSWORD='choose-a-password' \
   backend/.venv/bin/python -m app.cli bootstrap-admin    # run from backend/
 
-npm run dev            # all four servers
+npm run dev            # all five servers
 ```
 
 In development, email and texts go to the API log (`EMAIL_PROVIDER=console`, `SMS_PROVIDER=console`). Verification and reset links appear there. Files are stored under `backend/.storage`. Online payment is disabled unless Stripe test keys are set.
@@ -48,8 +49,8 @@ In development, email and texts go to the API log (`EMAIL_PROVIDER=console`, `SM
 ```bash
 npm run test:backend   # pytest against real PostgreSQL (embedded via pgserver, or TEST_DATABASE_URL)
 npm run lint:backend   # ruff
-npm run typecheck      # all three apps
-npm run build          # typecheck + production build of all three apps
+npm run typecheck      # all four apps
+npm run build          # typecheck + production build of all four apps
 ```
 
 The backend suite covers registration, login, logout, lockout, password reset, roles, CSRF, CORS, application submission, uploads and file-signature checks, document authorization and review, approval, eligibility, Stripe webhook signatures/idempotency/refunds/reconciliation, calendar and recurrence, matches and photos, CMS sanitization, contacts and filtering, exports, email/SMS campaigns with first-party campaign tracking and consent handling, SMS consent, renewal reminders, termination sweep, and the audit log. It includes end-to-end renewal and waiting-list flows through payment.

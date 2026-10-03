@@ -165,7 +165,7 @@ def send_renewal_reminders(db: Session, today: date | None = None) -> ReminderRe
     result = ReminderResult()
     if settings_row is None:
         return result
-    pay_link = f"{get_settings().apply_app_url.rstrip('/')}/renew"
+    pay_link = f"{get_settings().apply_app_url.rstrip('/')}/?type=renewal"
     cycle = current_cycle_cutoff(settings_row, today)
     days_out = (cycle - today).days
 
