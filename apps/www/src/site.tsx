@@ -19,8 +19,6 @@ export type Site = {
   background_check_url: string | null;
   images: Record<string, string | null>;
   image_alt: Record<string, string | null>;
-  apply_url: string;
-  portal_url: string;
   rules_version: string;
 };
 
@@ -48,8 +46,6 @@ const FALLBACK: Site = {
   background_check_url: null,
   images: {},
   image_alt: {},
-  apply_url: import.meta.env.VITE_APPLY_APP_URL || 'http://localhost:5173',
-  portal_url: import.meta.env.VITE_PORTAL_APP_URL || 'http://localhost:5174',
   rules_version: '',
 };
 
@@ -81,5 +77,3 @@ export function usePage(slug: string): AsyncState<Section[]> {
 export function section(sections: Section[] | undefined, key: string): Section | undefined {
   return sections?.find((s) => s.section_key === key);
 }
-
-export const BOARD_APP_URL: string = import.meta.env.VITE_BOARD_APP_URL || 'http://localhost:4174';

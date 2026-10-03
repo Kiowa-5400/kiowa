@@ -1,20 +1,12 @@
 /**
- * Where each member-facing site lives. The member portal (sign-in, account,
- * application status, payment) and the application form are separate apps
- * on separate subdomains, so links between them are full URLs.
+ * Links between the member portal (sign-in, account, application status,
+ * payment) and the application form, which are separate apps on separate
+ * subdomains. The addresses themselves live in apps/shared/urls.ts.
  */
 
-const trim = (url: string) => url.replace(/\/+$/, '');
+import { APPLY_URL, PORTAL_URL } from '../urls';
 
-export const WWW_URL: string = trim(import.meta.env.VITE_WWW_URL || 'http://localhost:4173');
-export const PORTAL_URL: string = trim(import.meta.env.VITE_PORTAL_APP_URL || 'http://localhost:5174');
-export const APPLY_URL: string = trim(import.meta.env.VITE_APPLY_APP_URL || 'http://localhost:5173');
-
-/** Application form link, e.g. applyUrl({ type: 'renewal' }). */
-export function applyUrl(params: Record<string, string | number> = {}): string {
-  const query = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-  return `${APPLY_URL}/${query ? `?${query}` : ''}`;
-}
+export { APPLY_URL, PORTAL_URL, WWW_URL, applyUrl } from '../urls';
 
 /** Portal sign-in page that returns to `next` (a full URL on one of the member apps) afterwards. */
 export function portalLoginUrl(next?: string): string {

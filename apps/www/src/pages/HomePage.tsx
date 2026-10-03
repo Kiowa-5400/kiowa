@@ -1,5 +1,6 @@
 import { Link, usePageTitle } from '@shared/router';
 import { ErrorState, Html, Loading } from '@shared/ui';
+import { APPLY_URL } from '@shared/urls';
 import { CustomSections, SectionCard } from '../components/Sections';
 import { section, siteImage, usePage, useSite } from '../site';
 
@@ -18,7 +19,7 @@ export function HomePage() {
           <h1 id="hero-title">{hero?.heading ?? site.site_title}</h1>
           {hero && <Html html={hero.body_html} className="prose hero-lead" />}
           <div className="row" style={{ marginTop: '1.25rem' }}>
-            <a className="btn btn-primary" href={`${site.apply_url}/`}>Renew or apply</a>
+            <a className="btn btn-primary" href={APPLY_URL}>Renew or apply</a>
             <Link className="btn" to="/calendar">View the calendar</Link>
           </div>
         </div>

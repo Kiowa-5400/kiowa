@@ -63,7 +63,7 @@ Each app is its own Pages project connected to this repository:
 For every project:
 
 - **Build command** `npm ci && npm run build`, **output directory** `dist`. Pages clones the whole repository, so `apps/shared` is available to the build.
-- **Environment variables** are the production URLs: `VITE_API_BASE_URL=https://app.kiowagunclub.org`, `VITE_WWW_URL=https://kiowagunclub.org`, `VITE_PORTAL_APP_URL=https://portal.kiowagunclub.org`, `VITE_APPLY_APP_URL=https://apply.kiowagunclub.org`, `VITE_BOARD_APP_URL=https://board.kiowagunclub.org`. Vite builds them into the bundle; a missing one falls back to `localhost`. Changing one needs a redeploy.
+- **Environment variables** are optional. Production builds already link to the addresses below (see `apps/shared/urls.ts` and `apps/shared/api.ts`); set one only to point an app somewhere else: `VITE_API_BASE_URL=https://app.kiowagunclub.org`, `VITE_WWW_URL=https://kiowagunclub.org`, `VITE_PORTAL_APP_URL=https://portal.kiowagunclub.org`, `VITE_APPLY_APP_URL=https://apply.kiowagunclub.org`, `VITE_BOARD_APP_URL=https://board.kiowagunclub.org`. Vite builds them into the bundle, so changing one needs a redeploy.
 - **Node version** comes from each app's `.node-version` (Vite 8 needs 22.12+).
 - **Security headers** (CSP, HSTS, etc.) and long-lived caching for `/assets/*` come from each app's `public/_headers`. If the API domain changes, update the CSP there.
 - **SPA routing** needs no configuration: with no `404.html`, Pages serves `index.html` for unknown paths.

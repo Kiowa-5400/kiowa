@@ -116,6 +116,15 @@ class Settings(BaseSettings):
             problems.append("CORS_ORIGINS must list the deployed www, portal, apply and board origins")
         elif any(not origin.startswith("https://") for origin in self.cors_origins):
             problems.append("CORS_ORIGINS must only contain https:// origins in production")
+        link_urls = {
+            "PUBLIC_SITE_URL": self.public_site_url,
+            "PORTAL_APP_URL": self.portal_app_url,
+            "APPLY_APP_URL": self.apply_app_url,
+            "BOARD_APP_URL": self.board_app_url,
+            "API_PUBLIC_URL": self.api_public_url,
+        }
+        if bad := [name for name, url in link_urls.items() if not url.startswith("https://")]:
+            problems.append(f"{', '.join(bad)} must be https:// addresses in production (they build links in emails)")
         if self.cookie_secure is False:
             problems.append("COOKIE_SECURE cannot be disabled in production")
         if self.email_provider == "console":

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link, useLocation } from '@shared/router';
-import { BOARD_APP_URL, siteImage, useSite } from './site';
+import { APPLY_URL, BOARD_URL, PORTAL_URL } from '@shared/urls';
+import { siteImage, useSite } from './site';
 import { AboutPage } from './pages/AboutPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { ContactPage } from './pages/ContactPage';
@@ -59,8 +60,8 @@ export function App() {
             {NAV.map((item) => (
               <Link key={item.to} to={item.to} aria-current={path === item.to ? 'page' : undefined}>{item.label}</Link>
             ))}
-            <a href={`${site.portal_url}`}>Member login</a>
-            <a className="btn btn-primary btn-sm nav-cta" href={`${site.apply_url}`}>Renew or apply</a>
+            <a href={PORTAL_URL}>Member login</a>
+            <a className="btn btn-primary btn-sm nav-cta" href={APPLY_URL}>Renew or apply</a>
           </nav>
         </div>
       </header>
@@ -96,8 +97,8 @@ function Footer() {
         <nav aria-label="Footer">
           <ul className="footer-links">
             {site.footer_links.map((link) => <li key={link.url}><a href={link.url}>{link.label}</a></li>)}
-            <li><a href={site.portal_url}>Member portal</a></li>
-            <li><a href={BOARD_APP_URL}>Board login</a></li>
+            <li><a href={PORTAL_URL}>Member portal</a></li>
+            <li><a href={BOARD_URL}>Board login</a></li>
           </ul>
         </nav>
       </div>

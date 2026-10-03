@@ -2,6 +2,7 @@ import { api } from '@shared/api';
 import { formatBytes, formatMoney } from '@shared/format';
 import { Link, usePageTitle } from '@shared/router';
 import { ErrorState, Loading, useAsync } from '@shared/ui';
+import { PORTAL_URL, applyUrl } from '@shared/urls';
 import { CustomSections, SectionCard } from '../components/Sections';
 import { section, usePage, useSite } from '../site';
 
@@ -23,9 +24,9 @@ export function MembershipPage() {
         <h1>Membership</h1>
         <p className="lead">Annual dues are {formatMoney(site.dues_amount)}. Renew your membership or apply for the waiting list online — upload your documents from a phone or computer.</p>
         <div className="row">
-          <a className="btn btn-primary" href={`${site.apply_url}/?type=renewal`}>Renew my membership</a>
-          {site.accepting_waiting_list && <a className="btn" href={`${site.apply_url}/?type=waiting_list`}>Apply for the waiting list</a>}
-          <a className="btn btn-ghost" href={`${site.portal_url}/login`}>Member login</a>
+          <a className="btn btn-primary" href={applyUrl({ type: 'renewal' })}>Renew my membership</a>
+          {site.accepting_waiting_list && <a className="btn" href={applyUrl({ type: 'waiting_list' })}>Apply for the waiting list</a>}
+          <a className="btn btn-ghost" href={PORTAL_URL}>Member login</a>
         </div>
       </header>
 

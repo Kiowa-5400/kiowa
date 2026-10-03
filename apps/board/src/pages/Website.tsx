@@ -3,13 +3,12 @@ import { api } from '@shared/api';
 import { formatDateTime } from '@shared/format';
 import { usePageTitle } from '@shared/router';
 import { Alert, Checkbox, ErrorState, FormErrors, Loading, TextField, useAction, useAsync } from '@shared/ui';
+import { WWW_URL } from '@shared/urls';
 import { PageHeader, RichTextEditor } from '../components/common';
 
 type Section = { id: number; section_key: string; label: string | null; heading: string | null; body_html: string; is_custom: boolean; is_visible: boolean; updated_at: string };
 type PageGroup = { slug: string; label: string; sections: Section[] };
 type ImageSlot = { key: string; label: string; url: string | null; alt_text: string | null; original_filename: string | null };
-
-const WWW_URL: string = import.meta.env.VITE_WWW_URL || 'http://localhost:4173';
 
 export function WebsitePage() {
   usePageTitle('Website text & photos');
