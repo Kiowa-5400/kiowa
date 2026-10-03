@@ -70,4 +70,4 @@ Render runs `alembic upgrade head` before every deploy.
 
 ## Deployment
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for Render setup, secrets, Stripe/Resend/Twilio configuration, scheduled jobs, backups and recovery. See [docs/MIGRATION.md](docs/MIGRATION.md) for how kiowa-gun's features map to this codebase and how to import its data.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for Render and Cloudflare Pages setup, secrets, Stripe/Resend/Twilio configuration, scheduled jobs, backups and recovery. See [docs/MIGRATION.md](docs/MIGRATION.md) for how kiowa-gun's features map to this codebase and how to import its data.

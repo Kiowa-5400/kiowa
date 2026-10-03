@@ -1,13 +1,14 @@
-# Render Blueprint for the Kiowa Gun Club.
+# Render Blueprint for the Kiowa Gun Club API, daily jobs and database.
 #
-# Domains assumed below (set them in each service's Custom Domains):
-#   kiowagunclub.org        -> kiowa-www      (public site)
-#   portal.kiowagunclub.org -> kiowa-portal   (member sign-in, account, status, payment)
-#   apply.kiowagunclub.org  -> kiowa-apply    (membership application form)
-#   board.kiowagunclub.org  -> kiowa-board    (board administration)
-#   api.kiowagunclub.org    -> kiowa-api      (FastAPI)
+# The four React apps are hosted on Cloudflare Pages, not here
+# (see docs/DEPLOYMENT.md). Domains:
+#   kiowagunclub.org        -> Pages: apps/www     (public site)
+#   portal.kiowagunclub.org -> Pages: apps/portal  (member sign-in, account, status, payment)
+#   apply.kiowagunclub.org  -> Pages: apps/apply   (membership application form)
+#   board.kiowagunclub.org  -> Pages: apps/board   (board administration)
+#   api.kiowagunclub.org    -> Render: kiowa-api   (FastAPI)
 # All five must share one parent domain so the API's session cookies are
-# same-site for the four apps. See docs/DEPLOYMENT.md.
+# same-site for the four apps.
 
 envVarGroups:
   - name: kiowa-shared
@@ -116,107 +117,3 @@ services:
         fromDatabase:
           name: kiowa-db
           property: connectionString
-
-  - type: web
-    name: kiowa-www
-    runtime: static
-    buildCommand: cd apps/www && npm ci && npm run build
-    staticPublishPath: apps/www/dist
-    envVars:
-      - key: NODE_VERSION
-        value: "22.20.0"
-      - key: VITE_API_BASE_URL
-        value: https://api.kiowagunclub.org
-      - key: VITE_PORTAL_APP_URL
-        value: https://portal.kiowagunclub.org
-      - key: VITE_APPLY_APP_URL
-        value: https://apply.kiowagunclub.org
-      - key: VITE_BOARD_APP_URL
-        value: https://board.kiowagunclub.org
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    headers: &static-headers
-      - path: /*
-        name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://api.kiowagunclub.org; connect-src 'self' https://api.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-      - path: /*
-        name: Strict-Transport-Security
-        value: max-age=63072000; includeSubDomains
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: Referrer-Policy
-        value: strict-origin-when-cross-origin
-      - path: /*
-        name: Permissions-Policy
-        value: camera=(), microphone=(), geolocation=()
-      - path: /assets/*
-        name: Cache-Control
-        value: public, max-age=31536000, immutable
-
-  - type: web
-    name: kiowa-portal
-    runtime: static
-    buildCommand: cd apps/portal && npm ci && npm run build
-    staticPublishPath: apps/portal/dist
-    envVars:
-      - key: NODE_VERSION
-        value: "22.20.0"
-      - key: VITE_API_BASE_URL
-        value: https://api.kiowagunclub.org
-      - key: VITE_WWW_URL
-        value: https://kiowagunclub.org
-      - key: VITE_PORTAL_APP_URL
-        value: https://portal.kiowagunclub.org
-      - key: VITE_APPLY_APP_URL
-        value: https://apply.kiowagunclub.org
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    headers: *static-headers
-
-  - type: web
-    name: kiowa-apply
-    runtime: static
-    buildCommand: cd apps/apply && npm ci && npm run build
-    staticPublishPath: apps/apply/dist
-    envVars:
-      - key: NODE_VERSION
-        value: "22.20.0"
-      - key: VITE_API_BASE_URL
-        value: https://api.kiowagunclub.org
-      - key: VITE_WWW_URL
-        value: https://kiowagunclub.org
-      - key: VITE_PORTAL_APP_URL
-        value: https://portal.kiowagunclub.org
-      - key: VITE_APPLY_APP_URL
-        value: https://apply.kiowagunclub.org
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    headers: *static-headers
-
-  - type: web
-    name: kiowa-board
-    runtime: static
-    buildCommand: cd apps/board && npm ci && npm run build
-    staticPublishPath: apps/board/dist
-    envVars:
-      - key: NODE_VERSION
-        value: "22.20.0"
-      - key: VITE_API_BASE_URL
-        value: https://api.kiowagunclub.org
-      - key: VITE_WWW_URL
-        value: https://kiowagunclub.org
-      - key: VITE_APPLY_APP_URL
-        value: https://apply.kiowagunclub.org
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    headers: *static-headers
