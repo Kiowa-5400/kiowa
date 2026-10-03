@@ -330,19 +330,32 @@ def reconcile_pending_payments(db: Session, *, older_than_minutes: int = 30) -> 
     counts = {"checked": 0, "paid": 0, "cancelled": 0}
     for payment in pending:
         counts["checked"] += 1
-        try:
-            session = gateway.retrieve_checkout_session(payment.stripe_checkout_session_id or "")
-        except PaymentProviderError:
-            logger.exception("reconcile_retrieve_failed", extra={"payment_id": payment.id})
-            continue
-        if session.get("payment_status") == "paid":
-            fulfill_checkout_session(db, session, source="reconciliation")
-            counts["paid"] += 1
-        elif session.get("status") == "expired":
-            _mark_session(db, session, "cancelled", "Checkout expired (found during reconciliation).")
-            counts["cancelled"] += 1
-        db.commit()
+        outcome = check_with_stripe(db, payment, source="reconciliation", gateway=gateway)
+        if outcome in counts:
+            counts[outcome] += 1
     return counts
+
+
+def check_with_stripe(db: Session, payment: Payment, *, source: str, gateway: PaymentGateway | None = None) -> str | None:
+    """Asks Stripe (server-to-server) about one pending card payment's Checkout
+    Session and records what it reports. Returns "paid", "cancelled" or None
+    when nothing changed or Stripe couldn't be reached."""
+    if payment.status != "pending" or payment.method != "card" or not payment.stripe_checkout_session_id:
+        return None
+    try:
+        session = (gateway or get_gateway()).retrieve_checkout_session(payment.stripe_checkout_session_id)
+    except (PaymentProviderError, PaymentsNotConfigured):
+        logger.exception("stripe_session_check_failed", extra={"payment_id": payment.id, "source": source})
+        return None
+    outcome = None
+    if session.get("payment_status") == "paid":
+        fulfill_checkout_session(db, session, source=source)
+        outcome = "paid"
+    elif session.get("status") == "expired":
+        _mark_session(db, session, "cancelled", f"Checkout expired (found during {source}).")
+        outcome = "cancelled"
+    db.commit()
+    return outcome
 
 
 # ---------------------------------------------------------------------------

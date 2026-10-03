@@ -342,11 +342,14 @@ def start_checkout(application_id: int, request: Request, auth: MemberAuth = Dep
 
 @router.get("/payments/checkout-status")
 def checkout_status(session_id: str, auth: MemberAuth = Depends(require_member), db: Session = Depends(get_db)) -> dict[str, object]:
-    """What the return page polls. Reports the database state only, which is
-    changed exclusively by the Stripe webhook / reconciliation."""
+    """What the return page polls. The browser's word changes nothing: while the
+    payment is pending, the API asks Stripe about the session itself, so the
+    member isn't left waiting on a slow or missing webhook."""
     payment = db.scalar(select(Payment).where(Payment.stripe_checkout_session_id == session_id))
     if payment is None or payment.person_id != auth.person.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+    if payment_service.check_with_stripe(db, payment, source="return page"):
+        db.refresh(payment)
     return {
         "status": payment.status,
         "amount": str(payment.amount),

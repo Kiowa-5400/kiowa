@@ -358,6 +358,22 @@ def test_expired_session_and_async_failure(api, new_api, db, gateway):
     assert db.get(Application, application["id"]).payment_status == "unpaid"
 
 
+def test_return_page_confirms_with_stripe_when_webhook_is_missing(api, new_api, db, gateway):
+    application, _ = _approved(api, new_api, db)
+    api.post(f"/api/applications/{application['id']}/checkout")
+    session = next(iter(gateway.sessions.values()))
+    assert api.get(f"/api/payments/checkout-status?session_id={session['id']}").json()["status"] == "pending"
+    # Stripe has taken the payment but its webhook hasn't arrived.
+    session.update({"payment_status": "paid", "payment_intent": "pi_test_123"})
+    status = api.get(f"/api/payments/checkout-status?session_id={session['id']}").json()
+    assert status["status"] == "paid" and status["covers_through"]
+    assert db.get(Application, application["id"]).status == "completed"
+    # The late webhook is then a no-op: one payment, one receipt.
+    post_webhook(api, completed_event(session))
+    assert len(db.scalars(select(Payment)).all()) == 1
+    assert len([m for m in email_outbox() if "payment received" in m.subject]) == 1
+
+
 def test_refund_and_reconciliation(api, new_api, db, gateway):
     application, reviewer = _approved(api, new_api, db)
     api.post(f"/api/applications/{application['id']}/checkout")
