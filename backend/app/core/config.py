@@ -64,11 +64,10 @@ class Settings(BaseSettings):
 
     # SMS
     # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
-    sms_provider: Literal["telnyx", "gateway", "console", "disabled"] = "console"
-    telnyx_api_key: str = ""
-    telnyx_messaging_profile_id: str = ""
-    telnyx_from_number: str = ""
-    telnyx_webhook_public_key: str = ""
+    sms_provider: Literal["twilio", "gateway", "console", "disabled"] = "console"
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_messaging_service_sid: str = ""
     veriphone_api_key: str = ""
     sms_from_name: str = "Kiowa Gun Club"
     sms_from_address: str = ""  # defaults to EMAIL_FROM_ADDRESS
@@ -125,9 +124,9 @@ class Settings(BaseSettings):
         if self.email_provider == "console":
             problems.append("EMAIL_PROVIDER must be 'resend' (or 'disabled') in production")
         if self.sms_provider == "console":
-            problems.append("SMS_PROVIDER must be 'telnyx', 'gateway' or 'disabled' in production")
-        if self.sms_provider == "telnyx" and (not self.telnyx_api_key or not self.telnyx_from_number):
-            problems.append("SMS_PROVIDER=telnyx needs TELNYX_API_KEY and TELNYX_FROM_NUMBER")
+            problems.append("SMS_PROVIDER must be 'twilio', 'gateway' or 'disabled' in production")
+        if self.sms_provider == "twilio" and (not self.twilio_account_sid or not self.twilio_auth_token or not self.twilio_messaging_service_sid):
+            problems.append("SMS_PROVIDER=twilio needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_MESSAGING_SERVICE_SID")
         if self.sms_provider == "gateway" and (not self.veriphone_api_key or self.email_provider != "resend"):
             problems.append("SMS_PROVIDER=gateway needs VERIPHONE_API_KEY and EMAIL_PROVIDER=resend")
         if problems:
