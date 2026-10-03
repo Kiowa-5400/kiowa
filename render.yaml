@@ -51,14 +51,12 @@ envVarGroups:
       - key: EMAIL_REPLY_TO
         sync: false
       - key: SMS_PROVIDER
-        value: telnyx
-      - key: TELNYX_API_KEY
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
         sync: false
-      - key: TELNYX_MESSAGING_PROFILE_ID
+      - key: TWILIO_AUTH_TOKEN
         sync: false
-      - key: TELNYX_FROM_NUMBER
-        sync: false
-      - key: TELNYX_WEBHOOK_PUBLIC_KEY
+      - key: TWILIO_MESSAGING_SERVICE_SID
         sync: false
       - key: VERIPHONE_API_KEY
         sync: false
