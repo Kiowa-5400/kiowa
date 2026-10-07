@@ -1,12 +1,10 @@
-# Render Blueprint for the Kiowa Gun Club API, daily jobs and database.
-#
-# The four React apps are hosted on Cloudflare Pages, not here
-# (see docs/DEPLOYMENT.md). Domains:
-#   kiowagunclub.org        -> Pages: apps/www     (public site)
-#   portal.kiowagunclub.org -> Pages: apps/portal  (member sign-in, account, status, payment)
-#   apply.kiowagunclub.org  -> Pages: apps/apply   (membership application form)
-#   board.kiowagunclub.org  -> Pages: apps/board   (board administration)
-#   app.kiowagunclub.org    -> Render: kiowa-api   (FastAPI)
+# Render Blueprint for the Kiowa Gun Club: API, daily jobs, database and the
+# four React apps (see docs/DEPLOYMENT.md). Domains:
+#   kiowagunclub.org        -> kiowa-www     (public site; Render adds www. -> apex)
+#   portal.kiowagunclub.org -> kiowa-portal  (member sign-in, account, status, payment)
+#   apply.kiowagunclub.org  -> kiowa-apply   (membership application form)
+#   board.kiowagunclub.org  -> kiowa-board   (board administration)
+#   app.kiowagunclub.org    -> kiowa-api     (FastAPI)
 # All five must share one parent domain so the API's session cookies are
 # same-site for the four apps.
 
@@ -35,36 +33,14 @@ envVarGroups:
         value: local
       - key: LOCAL_STORAGE_DIR
         value: /var/data/kiowa-storage
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
       - key: EMAIL_PROVIDER
         value: resend
-      - key: RESEND_API_KEY
-        sync: false
-      - key: RESEND_WEBHOOK_SECRET
-        sync: false
-      - key: EMAIL_FROM_ADDRESS
-        sync: false
       - key: EMAIL_FROM_NAME
         value: Kiowa Gun Club
-      - key: EMAIL_REPLY_TO
-        sync: false
       - key: SMS_PROVIDER
         value: twilio
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_MESSAGING_SERVICE_SID
-        sync: false
-      - key: VERIPHONE_API_KEY
-        sync: false
       - key: CRON_SECRET
         generateValue: true
-      - key: SENTRY_DSN
-        sync: false
 
 databases:
   - name: kiowa-db
@@ -83,6 +59,8 @@ services:
     preDeployCommand: alembic upgrade head && python -m app.cli bootstrap-admin
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips '*' --no-server-header
     healthCheckPath: /health
+    domains:
+      - app.kiowagunclub.org
     numInstances: 1
     disk:
       name: kiowa-storage
@@ -94,6 +72,30 @@ services:
         fromDatabase:
           name: kiowa-db
           property: connectionString
+      # Secrets, entered when the Blueprint is created. Render does not allow
+      # sync: false in an environment group; kiowa-daily-jobs reads these from here.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_REPLY_TO
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+      - key: VERIPHONE_API_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
       # First deploy only: create the initial administrator, then delete these.
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
@@ -117,3 +119,218 @@ services:
         fromDatabase:
           name: kiowa-db
           property: connectionString
+      - key: STRIPE_SECRET_KEY
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: STRIPE_SECRET_KEY
+      - key: STRIPE_WEBHOOK_SECRET
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: STRIPE_WEBHOOK_SECRET
+      - key: RESEND_API_KEY
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: RESEND_API_KEY
+      - key: RESEND_WEBHOOK_SECRET
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: RESEND_WEBHOOK_SECRET
+      - key: EMAIL_FROM_ADDRESS
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: EMAIL_FROM_ADDRESS
+      - key: EMAIL_REPLY_TO
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: EMAIL_REPLY_TO
+      - key: TWILIO_ACCOUNT_SID
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: TWILIO_ACCOUNT_SID
+      - key: TWILIO_AUTH_TOKEN
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: TWILIO_AUTH_TOKEN
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: TWILIO_MESSAGING_SERVICE_SID
+      - key: VERIPHONE_API_KEY
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: VERIPHONE_API_KEY
+      - key: SENTRY_DSN
+        fromService:
+          type: web
+          name: kiowa-api
+          envVarKey: SENTRY_DSN
+
+  # The four React apps. Each builds from the repo root (not rootDir) because
+  # files outside a rootDir are unavailable at build time, and every app
+  # imports apps/shared. buildFilter redeploys an app when it or shared changes.
+  # If the API domain changes, update the CSP below.
+  - type: web
+    name: kiowa-www
+    runtime: static
+    buildCommand: npm ci --prefix apps/www && npm run build --prefix apps/www
+    staticPublishPath: apps/www/dist
+    buildFilter:
+      paths:
+        - apps/www/**
+        - apps/shared/**
+    domains:
+      - kiowagunclub.org
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+    # SPA routing: Render serves real files first, then falls back to index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://app.kiowagunclub.org; connect-src 'self' https://app.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  - type: web
+    name: kiowa-portal
+    runtime: static
+    buildCommand: npm ci --prefix apps/portal && npm run build --prefix apps/portal
+    staticPublishPath: apps/portal/dist
+    buildFilter:
+      paths:
+        - apps/portal/**
+        - apps/shared/**
+    domains:
+      - portal.kiowagunclub.org
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+    # SPA routing: Render serves real files first, then falls back to index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://app.kiowagunclub.org; connect-src 'self' https://app.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  - type: web
+    name: kiowa-apply
+    runtime: static
+    buildCommand: npm ci --prefix apps/apply && npm run build --prefix apps/apply
+    staticPublishPath: apps/apply/dist
+    buildFilter:
+      paths:
+        - apps/apply/**
+        - apps/shared/**
+    domains:
+      - apply.kiowagunclub.org
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+    # SPA routing: Render serves real files first, then falls back to index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://app.kiowagunclub.org; connect-src 'self' https://app.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  - type: web
+    name: kiowa-board
+    runtime: static
+    buildCommand: npm ci --prefix apps/board && npm run build --prefix apps/board
+    staticPublishPath: apps/board/dist
+    buildFilter:
+      paths:
+        - apps/board/**
+        - apps/shared/**
+    domains:
+      - board.kiowagunclub.org
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+    # SPA routing: Render serves real files first, then falls back to index.html.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://app.kiowagunclub.org; connect-src 'self' https://app.kiowagunclub.org; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
