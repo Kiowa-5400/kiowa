@@ -245,6 +245,79 @@ def test_gateway_provider_caches_carrier_and_emails_gateway(db):
     assert not invalid.ok
 
 
+def test_httpsms_provider_sends_from_club_phone(db, monkeypatch):
+    import httpx
+
+    from app.core.config import get_settings
+    from app.services import sms as sms_service
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "httpsms_api_key", "httpsms-test-key")
+    monkeypatch.setattr(settings, "httpsms_from_number", "+16205550100")
+    calls = []
+
+    def fake_post(url, json, headers, timeout):  # noqa: ANN001, ANN202, A002
+        calls.append((url, json, headers))
+        status = 201 if json["to"] != "+16205550177" else 422
+        body = {"data": {"id": "msg-123", "status": "pending"}} if status == 201 else {"message": "invalid phone"}
+        return httpx.Response(status, json=body)
+
+    monkeypatch.setattr(sms_service.httpx, "post", fake_post)
+    person = _person(db, "httpsms@example.com", phone="(620) 555-0144", sms_opt_in=True, sms_opt_in_at=now_utc())
+    result = sms_service.HttpSmsProvider().send(person, "Range closed Saturday", media_url="https://example.com/a.png")
+    assert result.ok and result.message_id == "msg-123"
+    assert calls == [(sms_service.HTTPSMS_SEND_URL,
+                      {"from": "+16205550100", "to": "+16205550144", "content": "Range closed Saturday", "attachments": ["https://example.com/a.png"]},
+                      {"x-api-key": "httpsms-test-key"})]
+
+    person.phone = "(620) 555-0177"
+    rejected = sms_service.HttpSmsProvider().send(person, "x")
+    assert not rejected.ok and "422" in (rejected.error or "") and "invalid phone" in (rejected.error or "")
+
+
+def httpsms_token(key: str = "httpsms-signing-key", **claims) -> str:  # noqa: ANN003
+    def b64(data: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
+    signing_input = f"{b64({'alg': 'HS256', 'typ': 'JWT'})}.{b64({'exp': int(time.time()) + 300, **claims})}"
+    signature = base64.urlsafe_b64encode(hmac.new(key.encode(), signing_input.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+    return f"Bearer {signing_input}.{signature}"
+
+
+def test_httpsms_webhook_records_delivery(api, db, monkeypatch):
+    from app.core.config import get_settings
+    from app.models import SmsRecipient
+
+    monkeypatch.setattr(get_settings(), "httpsms_webhook_signing_key", "httpsms-signing-key")
+    board(api, db)
+    _person(db, "delivered@example.com", phone="(620) 555-0111", sms_opt_in=True, sms_opt_in_at=now_utc())
+    _person(db, "expired@example.com", phone="(620) 555-0112", sms_opt_in=True, sms_opt_in_at=now_utc())
+    sent = api.post("/api/board/sms/send", json={"body": "Range closed", "groups": ["active_members"], "email_if_text_fails": False}).json()
+    recipients = {r.phone: r for r in db.scalars(select(SmsRecipient).where(SmsRecipient.campaign_id == sent["campaign_id"]))}
+    delivered, expired = recipients["(620) 555-0111"], recipients["(620) 555-0112"]
+
+    def post(event_id, event_type, data, token=None):  # noqa: ANN001, ANN202
+        return api.client.post("/api/webhooks/sms/httpsms", json={"id": event_id, "type": event_type, "specversion": "1.0", "data": data},
+                               headers={"Authorization": token or httpsms_token(), "X-Event-Type": event_type})
+
+    event = ("evt-1", "message.phone.delivered", {"id": delivered.provider_message_id})
+    assert post(*event, token=httpsms_token("wrong-key")).status_code == 401
+    assert post(*event, token=httpsms_token(exp=int(time.time()) - 3600)).status_code == 401
+    assert post(*event).json() == {"status": "recorded"}
+    assert post(*event).json() == {"status": "duplicate"}
+    assert post("evt-2", "message.phone.sent", {"id": delivered.provider_message_id}).json() == {"status": "recorded"}
+
+    assert post("evt-3", "message.send.expired", {"message_id": expired.provider_message_id, "is_final": False}).json() == {"status": "recorded"}
+    db.refresh(expired)
+    assert expired.status == "sent"
+    assert post("evt-4", "message.send.expired", {"message_id": expired.provider_message_id, "is_final": True}).json() == {"status": "recorded"}
+    assert post("evt-5", "message.phone.received", {"id": "inbound"}).json() == {"status": "ignored"}
+
+    db.refresh(delivered)
+    db.refresh(expired)
+    assert delivered.status == "delivered" and delivered.delivered_at is not None
+    assert expired.status == "failed" and expired.error_code == "expired"
+
+
 # ---------------------------------------------------------------------------
 # Renewal cycle & scheduled jobs
 # ---------------------------------------------------------------------------

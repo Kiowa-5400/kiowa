@@ -60,8 +60,12 @@ class Settings(BaseSettings):
     email_reply_to: str = ""
 
     # SMS
-    # SMS: "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
-    sms_provider: Literal["twilio", "gateway", "console", "disabled"] = "console"
+    # SMS: "httpsms" = the httpSMS Android app sends from the club's phone (httpsms.com);
+    # "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
+    sms_provider: Literal["httpsms", "twilio", "gateway", "console", "disabled"] = "console"
+    httpsms_api_key: str = ""
+    httpsms_from_number: str = ""  # the club phone running the httpSMS app, e.g. +16205550100
+    httpsms_webhook_signing_key: str = ""  # signs delivery-status webhooks (HS256 JWT)
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_messaging_service_sid: str = ""
@@ -131,6 +135,8 @@ class Settings(BaseSettings):
             problems.append("EMAIL_PROVIDER must be 'resend' (or 'disabled') in production")
         if self.sms_provider == "console":
             problems.append("SMS_PROVIDER must be 'twilio', 'gateway' or 'disabled' in production")
+        if self.sms_provider == "httpsms" and (not self.httpsms_api_key or not self.httpsms_from_number):
+            problems.append("SMS_PROVIDER=httpsms needs HTTPSMS_API_KEY and HTTPSMS_FROM_NUMBER")
         if self.sms_provider == "twilio" and (not self.twilio_account_sid or not self.twilio_auth_token or not self.twilio_messaging_service_sid):
             problems.append("SMS_PROVIDER=twilio needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_MESSAGING_SERVICE_SID")
         if self.sms_provider == "gateway" and (not self.veriphone_api_key or self.email_provider != "resend"):

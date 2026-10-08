@@ -1,16 +1,22 @@
-"""Text messages through Twilio Programmable Messaging with consent enforcement.
+"""Text messages with consent enforcement.
 
-The production provider uses a Twilio Messaging Service for SMS/MMS delivery.
-Delivery status is finalized by Twilio status callbacks. Veriphone remains
-available only for the legacy carrier-gateway fallback.
+The production provider is httpSMS (httpsms.com): the httpSMS Android app on
+the club's phone sends each message, and delivery status is finalized by
+httpSMS webhooks. Twilio and the Veriphone carrier-gateway fallback remain
+available.
 
 Consent rule: nothing in this module sends to a person who hasn't opted in.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Protocol
@@ -110,6 +116,67 @@ class SmsProvider(Protocol):
     def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult: ...
 
 
+HTTPSMS_SEND_URL = "https://api.httpsms.com/v1/messages/send"
+
+
+class HttpSmsProvider:
+    """httpSMS: the club's Android phone sends the text; delivery is finalized by webhook."""
+
+    name = "httpsms"
+
+    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
+        number = to_e164(person.phone)
+        if not number:
+            return SmsResult("failed", "No valid 10-digit mobile number on file.")
+        settings = get_settings()
+        if not settings.httpsms_api_key or not settings.httpsms_from_number:
+            return SmsResult("failed", "httpSMS is not configured.")
+
+        payload: dict[str, object] = {"from": settings.httpsms_from_number, "to": number, "content": body}
+        if media_url:
+            payload["attachments"] = [media_url]
+        try:
+            response = httpx.post(HTTPSMS_SEND_URL, json=payload, headers={"x-api-key": settings.httpsms_api_key}, timeout=15)
+        except httpx.HTTPError as exc:
+            logger.exception("httpsms_send_failed")
+            return SmsResult("failed", f"httpSMS request failed: {exc}")
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("message")
+            except ValueError:
+                detail = None
+            return SmsResult("failed", f"httpSMS rejected the message ({response.status_code}){f': {detail}' if detail else ''}")
+        message_id = (response.json().get("data") or {}).get("id")
+        return SmsResult("sent", None, None, str(message_id) if message_id else None)
+
+
+def _b64url_decode(part: str) -> bytes:
+    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+
+
+def verify_httpsms_token(signing_key: str, authorization: str, leeway_seconds: int = 60) -> bool:
+    """httpSMS signs each webhook with an HS256 JWT (Authorization: Bearer ...)
+    using the signing key set when the webhook was created."""
+    if not signing_key or not authorization.startswith("Bearer "):
+        return False
+    try:
+        header_b64, claims_b64, signature_b64 = authorization.removeprefix("Bearer ").strip().split(".")
+        if json.loads(_b64url_decode(header_b64)).get("alg") != "HS256":
+            return False
+        expected = hmac.new(signing_key.encode(), f"{header_b64}.{claims_b64}".encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, _b64url_decode(signature_b64)):
+            return False
+        claims = json.loads(_b64url_decode(claims_b64))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    now = time.time()
+    if isinstance(claims.get("exp"), (int, float)) and claims["exp"] < now - leeway_seconds:
+        return False
+    if isinstance(claims.get("nbf"), (int, float)) and claims["nbf"] > now + leeway_seconds:
+        return False
+    return True
+
+
 class TwilioSmsProvider:
     """Twilio Programmable Messaging provider; delivery is finalized by webhook."""
 
@@ -191,6 +258,11 @@ class DisabledSmsProvider:
 @lru_cache(maxsize=1)
 def get_sms_provider() -> SmsProvider:
     settings = get_settings()
+    if settings.sms_provider == "httpsms":
+        if not settings.httpsms_api_key or not settings.httpsms_from_number:
+            logger.error("sms_provider_misconfigured", extra={"detail": "HTTPSMS_API_KEY or HTTPSMS_FROM_NUMBER missing"})
+            return DisabledSmsProvider()
+        return HttpSmsProvider()
     if settings.sms_provider == "twilio":
         if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
             logger.error("sms_provider_misconfigured", extra={"detail": "Twilio credentials or Messaging Service SID missing"})

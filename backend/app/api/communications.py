@@ -397,6 +397,63 @@ def unsubscribe(token: str = Query(min_length=8, max_length=64), db: Session = D
     return Message(message="You've been unsubscribed from Kiowa Gun Club emails. Account and dues notices will still be sent.")
 
 
+@webhook_router.post("/sms/httpsms")
+async def httpsms_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Record httpSMS delivery events (CloudEvents JSON) idempotently."""
+    signing_key = get_settings().httpsms_webhook_signing_key
+    if not signing_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="httpSMS webhook is not configured.")
+    if not sms_service.verify_httpsms_token(signing_key, request.headers.get("Authorization", "")):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
+
+    payload = await request.json()
+    event_type = payload.get("type") or request.headers.get("X-Event-Type", "")
+    data = payload.get("data") or {}
+    # Expired events carry the message as data.message_id; the others as data.id.
+    message_id = str(data.get("message_id") or data.get("id") or "") if event_type == "message.send.expired" else str(data.get("id") or "")
+    event_id = str(payload.get("id") or "")
+    if not message_id or not event_id or event_type not in {
+        "message.phone.sent", "message.phone.delivered", "message.send.failed", "message.send.expired",
+    }:
+        return {"status": "ignored"}
+
+    from app.models import SmsProviderEvent
+    if db.get(SmsProviderEvent, f"httpsms:{event_id}"):
+        return {"status": "duplicate"}
+
+    db.add(SmsProviderEvent(id=f"httpsms:{event_id}", event_type=event_type))
+    recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
+    if recipient is None:
+        db.commit()
+        return {"status": "unknown message"}
+
+    if event_type == "message.send.expired" and data.get("is_final") is False:
+        db.commit()  # httpSMS will try again
+        return {"status": "recorded"}
+
+    when = now_utc()
+    if event_type == "message.phone.sent":
+        # A late "sent" never moves a delivered or failed message backwards.
+        if recipient.status == "queued":
+            recipient.status = "sent"
+        recipient.sent_at = recipient.sent_at or when
+    elif event_type == "message.phone.delivered":
+        recipient.status = "delivered"
+        recipient.delivered_at = recipient.delivered_at or when
+    else:
+        recipient.status = "failed"
+        recipient.failed_at = recipient.failed_at or when
+        recipient.error_code = "expired" if event_type == "message.send.expired" else (str(data.get("error_message") or "")[:80] or None)
+        recipient.error = (
+            "The club phone didn't send the text in time."
+            if event_type == "message.send.expired"
+            else f"The club phone couldn't send the text ({data.get('error_message') or 'unknown error'})."
+        )
+
+    db.commit()
+    return {"status": "recorded"}
+
+
 @webhook_router.post("/sms/twilio")
 async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
     """Record Twilio SMS/MMS delivery status callbacks idempotently."""
