@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, matchPath, navigate, useLocation } from '@shared/router';
-import { Loading } from '@shared/ui';
+import { Alert, Loading, useAction } from '@shared/ui';
 import { useAuth } from './auth';
 import { AccountPage } from './pages/Account';
 import { ApplicationDetail, ApplicationsPage } from './pages/Applications';
@@ -90,6 +90,10 @@ export function App() {
   const { path } = useLocation();
   const { session, checking, can, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const signOutAction = useAction(async () => {
+    await signOut();
+    navigate('/');
+  });
   useEffect(() => setMenuOpen(false), [path]);
 
   if (checking) return <Loading />;
@@ -107,7 +111,7 @@ export function App() {
         </button>
         <div className="shell-user">
           <span className="small">{session.person.first_name} {session.person.last_name} · {session.role_label}</span>
-          <button type="button" className="btn btn-sm" onClick={() => void signOut().then(() => navigate('/'))}>Sign out</button>
+          <button type="button" className="btn btn-sm" disabled={signOutAction.busy} onClick={() => void signOutAction.run()}>Sign out</button>
         </div>
       </header>
       <nav id="board-nav" className={`sidebar ${menuOpen ? 'open' : ''}`} aria-label="Board menu">
@@ -127,7 +131,10 @@ export function App() {
           );
         })}
       </nav>
-      <main id="main" className="shell-main" tabIndex={-1}>{route(path)}</main>
+      <main id="main" className="shell-main" tabIndex={-1}>
+        {signOutAction.error && <Alert kind="error" title="You're still signed in.">{signOutAction.error}</Alert>}
+        {route(path)}
+      </main>
     </div>
   );
 }

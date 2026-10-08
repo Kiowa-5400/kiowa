@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { Link, matchPath, navigate, useLocation } from '@shared/router';
-import { Loading } from '@shared/ui';
+import { Alert, Loading, useAction } from '@shared/ui';
 import { useAuth } from '@shared/member/auth';
 import { APPLY_URL, WWW_URL, applyUrl } from '@shared/member/urls';
 import {
@@ -48,6 +48,10 @@ function memberRoute(path: string): ReactNode {
 export function App() {
   const { path, query } = useLocation();
   const { profile, checking, signOut } = useAuth();
+  const signOutAction = useAction(async () => {
+    await signOut();
+    navigate('/login');
+  });
 
   let content: ReactNode;
   // The application form lives on its own site; send /apply and /renew there.
@@ -69,7 +73,7 @@ export function App() {
               <>
                 <Link to="/" aria-current={path === '/' ? 'page' : undefined}>My membership</Link>
                 <Link to="/profile" aria-current={path === '/profile' ? 'page' : undefined}>My information</Link>
-                <button type="button" className="btn btn-sm" onClick={() => void signOut().then(() => navigate('/login'))}>Sign out</button>
+                <button type="button" className="btn btn-sm" disabled={signOutAction.busy} onClick={() => void signOutAction.run()}>Sign out</button>
               </>
             ) : (
               <>
@@ -80,7 +84,10 @@ export function App() {
           </nav>
         </div>
       </header>
-      <main id="main" className="container app-main" tabIndex={-1}>{content}</main>
+      <main id="main" className="container app-main" tabIndex={-1}>
+        {signOutAction.error && <Alert kind="error" title="You're still signed in.">{signOutAction.error}</Alert>}
+        {content}
+      </main>
       <footer className="app-footer container small muted">
         <a href={WWW_URL}>Back to the club website</a>
       </footer>

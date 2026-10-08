@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { navigate, useLocation } from '@shared/router';
-import { Loading } from '@shared/ui';
+import { Alert, Loading, useAction } from '@shared/ui';
 import { useAuth } from '@shared/member/auth';
 import { PORTAL_URL, WWW_URL, portalLoginUrl } from '@shared/member/urls';
 import { ApplyWizard } from './pages/ApplyWizard';
@@ -25,9 +25,19 @@ function GoTo({ to }: { to: string }) {
 export function App() {
   const { path, query } = useLocation();
   const { profile, checking, signOut } = useAuth();
+  // Set once signed out, so clearing the profile doesn't also trigger the
+  // "not signed in" redirect below and race the one to the portal's login page.
+  const [leaving, setLeaving] = useState(false);
+  const signOutAction = useAction(async () => {
+    await signOut();
+    setLeaving(true);
+    window.location.replace(`${PORTAL_URL}/login`);
+  });
 
   let content;
-  if (path === '/apply' || path === '/renew') {
+  if (signOutAction.busy || leaving) {
+    content = <Loading />;
+  } else if (path === '/apply' || path === '/renew') {
     // Older links: apply.kiowagunclub.org/apply?type=… and the renewal-reminder /renew link.
     const params = new URLSearchParams(query);
     if (path === '/renew') params.set('type', 'renewal');
@@ -53,12 +63,15 @@ export function App() {
             <nav className="row" aria-label="Member menu">
               <a href={`${PORTAL_URL}/`}>My membership</a>
               <a href={`${PORTAL_URL}/profile`}>My information</a>
-              <button type="button" className="btn btn-sm" onClick={() => void signOut().then(() => window.location.assign(`${PORTAL_URL}/login`))}>Sign out</button>
+              <button type="button" className="btn btn-sm" disabled={signOutAction.busy} onClick={() => void signOutAction.run()}>Sign out</button>
             </nav>
           )}
         </div>
       </header>
-      <main id="main" className="container app-main" tabIndex={-1}>{content}</main>
+      <main id="main" className="container app-main" tabIndex={-1}>
+        {signOutAction.error && <Alert kind="error" title="You're still signed in.">{signOutAction.error}</Alert>}
+        {content}
+      </main>
       <footer className="app-footer container small muted">
         <a href={WWW_URL}>Back to the club website</a>
       </footer>

@@ -44,7 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    try {
+      await api('/api/auth/logout', { method: 'POST', quiet401: true });
+    } catch (error) {
+      // A 401 means the session is already gone. Anything else means the cookie may
+      // still be live, so stay signed in rather than pretend it worked.
+      if (!(error instanceof ApiError && error.status === 401)) throw error;
+    }
     setCsrfToken(null);
     setProfile(null);
   }, []);
