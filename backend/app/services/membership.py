@@ -12,7 +12,7 @@ import html
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -27,6 +27,7 @@ from app.services import audit
 from app.services import email as email_service
 from app.services import sms as sms_service
 from app.services.audit import RequestContext
+from app.services.renewal import REMINDER_THRESHOLDS
 
 logger = logging.getLogger("kiowa.membership")
 
@@ -132,13 +133,28 @@ def _check_waiting_list_allowed(db: Session, person: Person) -> None:
 
 def _check_renewal_allowed(person: Person) -> None:
     """Renewal skips the waiting list and the background check, so it is only for people the
-    club already has as members (current, lapsed or terminated)."""
+    club already has as members (current, lapsed or terminated), and only once per cycle."""
     if person.membership_status in ("non_member", "waiting_list"):
         raise WorkflowError(
             "Renewal is for current and former members. If you're not a member yet, apply for the waiting list instead.",
             {"application_type": "Not available until you are a member."},
             409,
         )
+    if reason := already_renewed_reason(person):
+        raise WorkflowError(reason, {"application_type": reason}, 409)
+
+
+def already_renewed_reason(person: Person, today: date | None = None) -> str | None:
+    """Why this member can't renew yet: they're already paid through the cycle
+    being collected. Renewal opens when the reminders start, before the cutoff."""
+    today = today or club_today()
+    if person.membership_status != "member" or not person.renewal_date:
+        return None
+    opens = person.renewal_date - timedelta(days=max(REMINDER_THRESHOLDS))
+    if today >= opens:
+        return None
+    return (f"Your membership is already paid through {format_long_date(person.renewal_date)}. "
+            f"Renewal for the next year opens {format_long_date(opens)}.")
 
 
 def start_application(db: Session, person: Person, application_type: str) -> Application:
@@ -351,6 +367,10 @@ def evaluate_payment_eligibility(db: Session, application: Application, today: d
         reasons.append("Your NRA membership has expired.")
     if application.application_type == "waiting_list" and not person.background_check_cleared:
         reasons.append("Your background check has not been cleared by the board.")
+    # A renewal started earlier can't pay for a year that's already been paid since.
+    if application.application_type == "renewal" and application.status != "completed":
+        if renewed := already_renewed_reason(person, today):
+            reasons.append(renewed)
 
     amount = amount_due(settings_row, application)
     if amount < Decimal("0.50"):
