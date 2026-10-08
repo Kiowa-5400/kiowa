@@ -3,7 +3,6 @@ import { api } from '@shared/api';
 import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, FormErrors, Loading, TextField, useAction } from '@shared/ui';
 import { useAuth } from '@shared/member/auth';
-import { safeNext } from '@shared/member/urls';
 
 function AuthCard({ title, children }: { title: string; children: React.ReactNode }) {
   usePageTitle(title);
@@ -15,11 +14,8 @@ function AuthCard({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
-export function LoginPage({ next: nextProp }: { next?: string }) {
+export function LoginPage() {
   const { signIn } = useAuth();
-  const { query } = useLocation();
-  // ?next= may be a full URL on the application site (apply.kiowagunclub.org sends people here to sign in).
-  const next = safeNext(nextProp ?? query.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
@@ -31,8 +27,7 @@ export function LoginPage({ next: nextProp }: { next?: string }) {
       setNeedsVerification(error instanceof Error && /verify/i.test(error.message));
       throw error;
     }
-    if (next && 'href' in next) window.location.assign(next.href);
-    else navigate(next?.path ?? '/', { replace: true });
+    navigate('/', { replace: true });
   });
   const resend = useAction(() => api('/api/auth/email/resend', { body: { email } }));
 

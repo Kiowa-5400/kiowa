@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { navigate, useLocation } from '@shared/router';
 import { Alert, Loading, useAction } from '@shared/ui';
 import { useAuth } from '@shared/member/auth';
-import { PORTAL_URL, WWW_URL, portalLoginUrl } from '@shared/member/urls';
+import { PORTAL_URL, WWW_URL } from '@shared/member/urls';
 import { ApplyWizard } from './pages/ApplyWizard';
 
 /** Full-page redirect to another site (the member portal). */
@@ -48,7 +48,7 @@ export function App() {
   } else if (checking) {
     content = <Loading />;
   } else if (!profile) {
-    content = <LeaveTo href={portalLoginUrl(window.location.href)} />;
+    content = <LeaveTo href={`${PORTAL_URL}/`} />;
   } else {
     content = <ApplyWizard />;
   }

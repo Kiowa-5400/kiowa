@@ -46,7 +46,7 @@ function memberRoute(path: string): ReactNode {
 }
 
 export function App() {
-  const { path, query } = useLocation();
+  const { path } = useLocation();
   const { profile, checking, signOut } = useAuth();
   const signOutAction = useAction(async () => {
     await signOut();
@@ -59,7 +59,7 @@ export function App() {
   else if (path === '/renew') content = <LeaveTo href={applyUrl({ type: 'renewal' })} />;
   else if (checking) content = <Loading />;
   else if (PUBLIC_ROUTES[path]) content = PUBLIC_ROUTES[path]();
-  else if (!profile) content = <LoginPage next={path === '/' ? undefined : `${path}?${query.toString()}`} />;
+  else if (!profile) content = <LoginPage />;
   else content = memberRoute(path);
 
   return (
