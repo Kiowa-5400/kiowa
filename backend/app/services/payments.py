@@ -58,6 +58,8 @@ class PaymentGateway(Protocol):
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]: ...
 
+    def expire_checkout_session(self, session_id: str) -> dict[str, Any]: ...
+
     def create_refund(self, payment_intent_id: str, amount_cents: int, idempotency_key: str) -> dict[str, Any]: ...
 
     def verify_webhook(self, payload: bytes, signature: str | None) -> dict[str, Any]: ...
@@ -83,6 +85,12 @@ class StripeGateway:
             return self._client.v1.checkout.sessions.retrieve(session_id).to_dict()
         except stripe.StripeError as exc:
             raise PaymentProviderError(str(exc)) from exc
+
+    def expire_checkout_session(self, session_id: str) -> dict[str, Any]:
+        try:
+            return self._client.v1.checkout.sessions.expire(session_id).to_dict()
+        except stripe.StripeError as exc:
+            raise PaymentProviderError(exc.user_message or str(exc)) from exc
 
     def create_refund(self, payment_intent_id: str, amount_cents: int, idempotency_key: str) -> dict[str, Any]:
         try:
@@ -119,13 +127,16 @@ class CheckoutStart:
 def start_checkout(db: Session, application: Application, person: Person, context: RequestContext) -> CheckoutStart:
     if application.person_id != person.id:
         raise WorkflowError("You can only pay for your own application.", status_code=403)
+    gateway = get_gateway()
+    # Serializes checkout starts for this application (double clicks, two tabs).
+    db.refresh(application, with_for_update=True)
+    _settle_earlier_checkouts(db, application, gateway)
     eligibility = evaluate_payment_eligibility(db, application)
     refresh_eligibility(db, application)
     if not eligibility.eligible:
         db.commit()
         raise WorkflowError(" ".join(eligibility.reasons), status_code=409)
 
-    gateway = get_gateway()
     settings = get_settings()
     payment = Payment(
         person_id=person.id,
@@ -177,6 +188,35 @@ def start_checkout(db: Session, application: Application, person: Person, contex
                  details={"amount": str(payment.amount), "application_id": application.id}, context=context)
     db.commit()
     return CheckoutStart(payment=payment, checkout_url=session["url"])
+
+
+def _settle_earlier_checkouts(db: Session, application: Application, gateway: PaymentGateway) -> None:
+    """Only one Checkout Session per application may be payable at a time, or a
+    member with two tabs open could pay the same dues twice. Before a new one is
+    created, each earlier unfinished one is recorded if Stripe says it was paid,
+    or expired at Stripe if it's still open."""
+    earlier = db.scalars(
+        select(Payment).where(
+            Payment.application_id == application.id,
+            Payment.status == "pending",
+            Payment.method == "card",
+            Payment.stripe_checkout_session_id.is_not(None),
+        )
+    ).all()
+    for payment in earlier:
+        session = gateway.retrieve_checkout_session(payment.stripe_checkout_session_id)
+        if session.get("payment_status") == "paid":
+            fulfill_checkout_session(db, session, source="new checkout")
+        elif session.get("status") == "open":
+            # Raises if the member finishes paying at this very moment; the next attempt then finds it paid.
+            gateway.expire_checkout_session(payment.stripe_checkout_session_id)
+            _mark_session(db, session, "cancelled", "Replaced by a newer checkout.")
+        elif session.get("status") == "expired":
+            _mark_session(db, session, "cancelled", "Checkout was abandoned or expired.")
+        else:
+            # Complete but not yet paid: a bank payment that is still clearing.
+            db.commit()
+            raise WorkflowError("A payment for these dues is still processing. We'll email you when it clears.", status_code=409)
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +285,9 @@ def fulfill_checkout_session(db: Session, session: dict[str, Any], *, source: st
     payment.status = "paid"
     payment.paid_at = now_utc()
     payment.stripe_payment_intent_id = session.get("payment_intent") if isinstance(session.get("payment_intent"), str) else payment.stripe_payment_intent_id
+    if payment.application is not None and payment.application.payment_status == "paid":
+        _flag_duplicate(db, payment, source)
+        return payment
     _apply_membership_payment(db, payment)
     audit.record(db, actor=None, action="payment.succeeded", entity_type="payment", entity_id=payment.id,
                  summary=f"${payment.amount:.2f} dues paid by {payment.person.full_name}",
@@ -252,6 +295,31 @@ def fulfill_checkout_session(db: Session, session: dict[str, Any], *, source: st
     db.flush()
     _send_receipt(payment)
     return payment
+
+
+def _flag_duplicate(db: Session, payment: Payment, source: str) -> None:
+    """Stripe took money for dues another payment already covered. The money is
+    recorded, but it must not extend the membership a second time; the
+    treasurers are asked to refund it."""
+    from app.core.permissions import Permission, has_permission
+    from app.services.people import active_board_people
+
+    person = payment.person
+    payment.failure_reason = "Duplicate: these dues were already paid by another payment. Refund this one."
+    audit.record(db, actor=None, action="payment.duplicate", entity_type="payment", entity_id=payment.id,
+                 summary=f"Duplicate ${payment.amount:.2f} dues payment from {person.full_name}",
+                 details={"source": source, "application_id": payment.application_id})
+    logger.error("stripe_duplicate_payment", extra={"payment_id": payment.id})
+    db.flush()
+    for board_person in active_board_people(db):
+        if board_person.board_user and has_permission(board_person.board_user.role, Permission.PAYMENTS_MANAGE):
+            email_service.send_transactional(
+                board_person.email,
+                "Duplicate dues payment needs a refund",
+                f"<p>{html.escape(person.full_name)} ({html.escape(person.email)}) was charged "
+                f"<strong>${payment.amount:.2f}</strong> for dues that were already paid. Their membership was not "
+                f"extended again. Please refund this payment from the Payments page of the board site.</p>",
+            )
 
 
 def _mark_session(db: Session, session: dict[str, Any], status: str, reason: str) -> None:
@@ -274,7 +342,7 @@ def _apply_refund_totals(db: Session, payment_intent_id: str | None, refunded_ce
     payment.refunded_amount = from_cents(refunded_cents)
     if payment.refunded_amount >= payment.amount:
         payment.status = "refunded"
-        if payment.application is not None:
+        if payment.application is not None and payment.covers_through is not None:
             payment.application.payment_status = "refunded"
     elif payment.refunded_amount > 0:
         payment.status = "partially_refunded"
@@ -425,7 +493,8 @@ def refund_payment(db: Session, payment: Payment, amount: Decimal, reason: str, 
             raise PaymentProviderError(f"Stripe refund status: {refund.get('status')}")
     payment.refunded_amount = payment.refunded_amount + amount
     payment.status = "refunded" if payment.refunded_amount >= payment.amount else "partially_refunded"
-    if payment.status == "refunded" and payment.application is not None:
+    # A refunded duplicate (covers_through unset) never paid the application, so leave it paid.
+    if payment.status == "refunded" and payment.application is not None and payment.covers_through is not None:
         payment.application.payment_status = "refunded"
     payment.notes = "\n".join(filter(None, [payment.notes, f"Refund ${amount:.2f}: {reason.strip()}"]))
     audit.record(db, actor=actor, action="payment.refunded", entity_type="payment", entity_id=payment.id,

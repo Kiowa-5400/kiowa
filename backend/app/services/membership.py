@@ -123,20 +123,26 @@ def open_application(db: Session, person: Person) -> Application | None:
     )
 
 
+def _check_waiting_list_allowed(db: Session, person: Person) -> None:
+    if person.membership_status == "member":
+        raise WorkflowError("You're already an active member. Choose a membership renewal instead.")
+    if not site_settings(db).accepting_waiting_list:
+        raise WorkflowError("The club isn't accepting new waiting-list applications right now.")
+
+
 def start_application(db: Session, person: Person, application_type: str) -> Application:
     existing = open_application(db, person)
     if existing is not None:
         if existing.status == "draft" and existing.application_type != application_type:
+            # Switching a draft to the waiting list has to pass the same checks as starting one.
+            if application_type == "waiting_list":
+                _check_waiting_list_allowed(db, person)
             existing.application_type = application_type
             existing.documentation_method = None if application_type == "renewal" else existing.documentation_method
             existing.claims_cleanup_discount = False if application_type == "waiting_list" else existing.claims_cleanup_discount
         return existing
-    settings_row = site_settings(db)
     if application_type == "waiting_list":
-        if person.membership_status == "member":
-            raise WorkflowError("You're already an active member. Choose a membership renewal instead.")
-        if not settings_row.accepting_waiting_list:
-            raise WorkflowError("The club isn't accepting new waiting-list applications right now.")
+        _check_waiting_list_allowed(db, person)
     application = Application(person_id=person.id, application_type=application_type, status="draft")
     db.add(application)
     db.flush()

@@ -6,7 +6,7 @@ import json
 from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import get_settings
 from app.models import Application, AuditLog, Document, Payment, Person
@@ -111,6 +111,16 @@ def test_waiting_list_needs_background_check_or_ccl_not_both(api):
     assert "document_concealed_carry" in errors and "document_background_check" not in errors
     upload(api, application["id"], "concealed_carry", JPEG, "ccl.jpg", "image/jpeg")
     assert submit(api, application["id"]).status_code == 200
+
+
+def test_draft_cannot_switch_to_closed_waiting_list(api, db):
+    member(api, "switch@example.com", **FULL_PROFILE)
+    application = start(api)
+    db.execute(text("UPDATE site_settings SET accepting_waiting_list = false"))
+    db.commit()
+    response = api.patch(f"/api/applications/{application['id']}", json={"application_type": "waiting_list"})
+    assert response.status_code == 422
+    assert api.get(f"/api/applications/{application['id']}").json()["application_type"] == "renewal"
 
 
 def test_only_one_open_application(api):
@@ -379,6 +389,65 @@ def test_return_page_confirms_with_stripe_when_webhook_is_missing(api, new_api, 
     post_webhook(api, completed_event(session))
     assert len(db.scalars(select(Payment)).all()) == 1
     assert len([m for m in email_outbox() if "payment received" in m.subject]) == 1
+
+
+def test_new_checkout_expires_the_earlier_one(api, new_api, db, gateway):
+    application, _ = _approved(api, new_api, db)
+    assert api.post(f"/api/applications/{application['id']}/checkout").status_code == 200
+    assert api.post(f"/api/applications/{application['id']}/checkout").status_code == 200
+    first, second = gateway.sessions.values()
+    assert first["status"] == "expired" and second["status"] == "open"
+    payments = db.scalars(select(Payment).order_by(Payment.id)).all()
+    assert [p.status for p in payments] == ["cancelled", "pending"]
+    assert db.get(Application, application["id"]).payment_status == "pending"
+
+
+def test_new_checkout_records_an_earlier_paid_one_instead(api, new_api, db, gateway):
+    application, _ = _approved(api, new_api, db)
+    api.post(f"/api/applications/{application['id']}/checkout")
+    session = next(iter(gateway.sessions.values()))
+    # Paid in another tab; the webhook hasn't arrived yet.
+    session.update({"payment_status": "paid", "status": "complete", "payment_intent": "pi_test_123"})
+    again = api.post(f"/api/applications/{application['id']}/checkout")
+    assert again.status_code == 409 and "already been paid" in again.json()["detail"]
+    assert len(gateway.sessions) == 1
+    assert db.scalar(select(Payment)).status == "paid"
+    assert db.get(Application, application["id"]).status == "completed"
+
+
+def test_new_checkout_waits_for_a_clearing_bank_payment(api, new_api, db, gateway):
+    application, _ = _approved(api, new_api, db)
+    api.post(f"/api/applications/{application['id']}/checkout")
+    next(iter(gateway.sessions.values())).update({"status": "complete", "payment_status": "unpaid"})
+    again = api.post(f"/api/applications/{application['id']}/checkout")
+    assert again.status_code == 409 and "still processing" in again.json()["detail"]
+    assert len(gateway.sessions) == 1
+
+
+def test_duplicate_payment_is_flagged_not_applied_twice(api, new_api, db, gateway):
+    application, reviewer = _approved(api, new_api, db)
+    api.post(f"/api/applications/{application['id']}/checkout")
+    api.post(f"/api/applications/{application['id']}/checkout")
+    first, second = gateway.sessions.values()
+    # Simulate both sessions having been paid anyway (the race the checkout guard closes).
+    db.execute(Payment.__table__.update().where(Payment.stripe_checkout_session_id == first["id"]).values(status="pending"))
+    db.commit()
+    post_webhook(api, completed_event(second, event_id="evt_a", payment_intent="pi_second"))
+    person = db.scalar(select(Person).where(Person.email == "pay@example.com"))
+    paid_through = person.renewal_date
+    post_webhook(api, completed_event(first, event_id="evt_b", payment_intent="pi_first"))
+
+    db.expire_all()
+    assert person.renewal_date == paid_through
+    duplicate = db.scalar(select(Payment).where(Payment.stripe_checkout_session_id == first["id"]))
+    assert duplicate.status == "paid" and duplicate.covers_through is None and "Duplicate" in duplicate.failure_reason
+    assert any("Duplicate dues payment" in m.subject for m in email_outbox())
+    assert len([m for m in email_outbox() if m.to == "pay@example.com" and "payment received" in m.subject]) == 1
+
+    refund = reviewer.post(f"/api/board/payments/{duplicate.id}/refund", json={"amount": "150.00", "reason": "Duplicate"})
+    assert refund.status_code == 200 and refund.json()["status"] == "refunded"
+    db.expire_all()
+    assert db.get(Application, application["id"]).payment_status == "paid"
 
 
 def test_refund_and_reconciliation(api, new_api, db, gateway):

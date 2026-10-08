@@ -116,6 +116,12 @@ class FakeGateway(payment_service.StripeGateway):
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         return self.sessions[session_id]
 
+    def expire_checkout_session(self, session_id: str) -> dict[str, Any]:
+        session = self.sessions[session_id]
+        assert session["status"] == "open", "Stripe only expires open sessions"
+        session["status"] = "expired"
+        return session
+
     def create_refund(self, payment_intent_id: str, amount_cents: int, idempotency_key: str) -> dict[str, Any]:
         self.refunds.append((payment_intent_id, amount_cents))
         return {"id": "re_test", "status": "succeeded"}
