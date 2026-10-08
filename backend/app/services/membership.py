@@ -130,19 +130,34 @@ def _check_waiting_list_allowed(db: Session, person: Person) -> None:
         raise WorkflowError("The club isn't accepting new waiting-list applications right now.")
 
 
+def _check_renewal_allowed(person: Person) -> None:
+    """Renewal skips the waiting list and the background check, so it is only for people the
+    club already has as members (current, lapsed or terminated)."""
+    if person.membership_status in ("non_member", "waiting_list"):
+        raise WorkflowError(
+            "Renewal is for current and former members. If you're not a member yet, apply for the waiting list instead.",
+            {"application_type": "Not available until you are a member."},
+            409,
+        )
+
+
 def start_application(db: Session, person: Person, application_type: str) -> Application:
     existing = open_application(db, person)
     if existing is not None:
         if existing.status == "draft" and existing.application_type != application_type:
-            # Switching a draft to the waiting list has to pass the same checks as starting one.
+            # Switching a draft to another type has to pass the same checks as starting one.
             if application_type == "waiting_list":
                 _check_waiting_list_allowed(db, person)
+            else:
+                _check_renewal_allowed(person)
             existing.application_type = application_type
             existing.documentation_method = None if application_type == "renewal" else existing.documentation_method
             existing.claims_cleanup_discount = False if application_type == "waiting_list" else existing.claims_cleanup_discount
         return existing
     if application_type == "waiting_list":
         _check_waiting_list_allowed(db, person)
+    else:
+        _check_renewal_allowed(person)
     application = Application(person_id=person.id, application_type=application_type, status="draft")
     db.add(application)
     db.flush()

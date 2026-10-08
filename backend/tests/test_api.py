@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from app.models import AuditLog, Person
+from app.services import auth as auth_service
 from tests.conftest import email_outbox, last_token
 from tests.helpers import PASSWORD, board, board_sign_in, create_board_user, register_and_verify, sign_in
 
@@ -35,23 +36,55 @@ def test_cors_allows_only_configured_origins(api):
     assert "access-control-allow-origin" not in blocked.headers
 
 
-def test_registration_requires_email_verification(api):
-    response = api.post("/api/auth/register", json={"first_name": "Pat", "last_name": "Shooter", "email": "Pat@Example.com", "password": PASSWORD})
+def test_registration_sets_the_password_from_the_emailed_link(api):
+    response = api.post("/api/auth/register", json={"first_name": "Pat", "last_name": "Shooter", "email": "Pat@Example.com"})
     assert response.status_code == 202
-    blocked = api.post("/api/auth/login", json={"email": "pat@example.com", "password": PASSWORD})
-    assert blocked.status_code == 403 and "verify" in blocked.json()["detail"].lower()
-    token = last_token("pat@example.com", "/verify-email")
-    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 200
+    # Nothing can sign in until the emailed link has been used.
+    assert api.post("/api/auth/login", json={"email": "pat@example.com", "password": PASSWORD}).status_code == 401
+    token = last_token("pat@example.com", "/reset-password")
+    assert api.post("/api/auth/password/reset", json={"token": token, "password": PASSWORD}).status_code == 200
     # One-time: the same link can't be reused.
-    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 400
+    assert api.post("/api/auth/password/reset", json={"token": token, "password": "Another-Pass-1"}).status_code == 400
     session = sign_in(api, "pat@example.com")
     assert session["profile"]["email"] == "pat@example.com"
     assert session["profile"]["membership_status"] == "non_member"
 
 
+def test_registrant_never_chooses_the_password_of_an_address_they_may_not_own(new_api):
+    """Registering someone else's address must not leave the registrant with a working login."""
+    attacker, victim = new_api(), new_api()
+    # The form no longer accepts a password at all.
+    rejected = attacker.post("/api/auth/register", json={"first_name": "Vic", "last_name": "Tim", "email": "victim@example.com", "password": "Attacker-Pass-99"})
+    assert rejected.status_code == 422
+    assert attacker.post("/api/auth/register", json={"first_name": "Vic", "last_name": "Tim", "email": "victim@example.com"}).status_code == 202
+    # The owner of the inbox sets the password from the link, and only that works.
+    token = last_token("victim@example.com", "/reset-password")
+    assert victim.post("/api/auth/password/reset", json={"token": token, "password": "Victim-Pass-123"}).status_code == 200
+    assert attacker.post("/api/auth/login", json={"email": "victim@example.com", "password": "Attacker-Pass-99"}).status_code == 401
+    assert victim.post("/api/auth/login", json={"email": "victim@example.com", "password": "Victim-Pass-123"}).status_code == 200
+
+
+def test_old_verification_links_no_longer_verify_anything(api, db):
+    person = Person(first_name="Old", last_name="Link", email="oldlink@example.com", membership_status="non_member")
+    db.add(person)
+    db.commit()
+    token = auth_service.issue_token(db, person, "email_verification")
+    db.commit()
+    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 410
+    db.refresh(person)
+    assert person.email_verified_at is None
+
+
+def test_resend_sends_a_setup_link_to_unverified_accounts(api):
+    api.post("/api/auth/register", json={"first_name": "Pat", "last_name": "Shooter", "email": "pat@example.com"})
+    first = last_token("pat@example.com", "/reset-password")
+    api.post("/api/auth/email/resend", json={"email": "pat@example.com"})  # inside the cooldown: no second email
+    assert last_token("pat@example.com", "/reset-password") == first
+
+
 def test_registration_does_not_reveal_existing_accounts(api, db):
     register_and_verify(api, "taken@example.com")
-    response = api.post("/api/auth/register", json={"first_name": "X", "last_name": "Y", "email": "taken@example.com", "password": "another-password-1"})
+    response = api.post("/api/auth/register", json={"first_name": "X", "last_name": "Y", "email": "taken@example.com"})
     assert response.status_code == 202
     # The existing password still works; the inbox owner got a reset link instead.
     sign_in(api, "taken@example.com")
@@ -61,7 +94,7 @@ def test_registration_does_not_reveal_existing_accounts(api, db):
 def test_existing_contact_claims_record_by_email_link(api, db):
     db.add(Person(first_name="Old", last_name="Member", email="old@example.com", membership_status="member"))
     db.commit()
-    api.post("/api/auth/register", json={"first_name": "Old", "last_name": "Member", "email": "old@example.com", "password": PASSWORD})
+    api.post("/api/auth/register", json={"first_name": "Old", "last_name": "Member", "email": "old@example.com"})
     token = last_token("old@example.com", "/reset-password")
     assert api.post("/api/auth/password/reset", json={"token": token, "password": "New-Password-123"}).status_code == 200
     session = sign_in(api, "old@example.com", "New-Password-123")
@@ -69,9 +102,23 @@ def test_existing_contact_claims_record_by_email_link(api, db):
 
 
 def test_weak_password_rejected(api):
-    response = api.post("/api/auth/register", json={"first_name": "A", "last_name": "B", "email": "a@example.com", "password": "short"})
+    api.post("/api/auth/register", json={"first_name": "A", "last_name": "B", "email": "a@example.com"})
+    token = last_token("a@example.com", "/reset-password")
+    response = api.post("/api/auth/password/reset", json={"token": token, "password": "short"})
     assert response.status_code == 422
     assert "password" in response.json()["errors"]
+
+
+def test_rate_limits_cannot_be_dodged_with_a_forged_forwarded_for_header(api):
+    """Only the entry added by our own proxy counts; anything the client prepends is ignored."""
+    codes = [
+        api.post("/api/auth/password/forgot", json={"email": "x@example.com"}, headers={"X-Forwarded-For": f"203.0.113.{i}, 198.51.100.7"}).status_code
+        for i in range(8)
+    ]
+    assert codes[:5] == [200] * 5 and set(codes[5:]) == {429}
+    # A different real client address (the proxy's entry) has its own allowance.
+    other = api.post("/api/auth/password/forgot", json={"email": "x@example.com"}, headers={"X-Forwarded-For": "203.0.113.1, 198.51.100.8"})
+    assert other.status_code == 200
 
 
 def test_session_cookie_is_httponly_and_logout_invalidates(api):

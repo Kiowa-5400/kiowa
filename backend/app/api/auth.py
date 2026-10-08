@@ -8,6 +8,7 @@ Both realms share one credential per person and one set of reset links.
 from __future__ import annotations
 
 import html
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -40,7 +41,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 board_router = APIRouter(prefix="/api/board/auth", tags=["board auth"])
 
 GENERIC_RESET = "If that email has an account, we've sent a link to set a new password. It expires in 1 hour."
-GENERIC_REGISTER = "Check your email for a link to verify your address and finish setting up your account."
+GENERIC_REGISTER = "Check your email for a link to choose your password and finish setting up your account."
 
 
 class LoginRequest(APIModel):
@@ -50,10 +51,12 @@ class LoginRequest(APIModel):
 
 
 class RegisterRequest(APIModel):
+    """No password here: it is chosen from the emailed link, so whoever registers an
+    address can never be the one who knows the password of the account behind it."""
+
     first_name: Name
     last_name: Name
     email: Email
-    password: str = Field(max_length=256)
     phone: Phone = None
 
 
@@ -95,28 +98,23 @@ def _link(app: str, path: str, token: str) -> str:
     return f"{base.rstrip('/')}{path}?token={token}"
 
 
-def send_verification_email(db: Session, person: Person) -> None:
-    token = auth_service.issue_token(db, person, "email_verification")
-    db.commit()
-    email_service.send_transactional(
-        person.email,
-        "Verify your email for the Kiowa Gun Club member portal",
-        f"<p>Hi {html.escape(person.first_name)},</p><p>Please confirm this is your email address to finish setting up "
-        f"your Kiowa Gun Club account.</p>"
-        + email_service.button(_link("portal", "/verify-email", token), "Verify my email")
-        + "<p>This link expires in 24 hours. If you didn't create an account, you can ignore this message.</p>",
-    )
+def _lifetime(ttl: timedelta) -> str:
+    hours = int(ttl.total_seconds() // 3600)
+    return "1 hour" if hours == 1 else f"{hours} hours"
 
 
-def send_password_link(db: Session, person: Person, app: str, *, intro: str) -> None:
-    token = auth_service.issue_token(db, person, "password_reset")
+def send_password_link(db: Session, person: Person, app: str, *, intro: str, ttl: timedelta | None = None) -> None:
+    """Emails a link that sets the password (and, because it proves control of the inbox,
+    verifies the address). Used for new accounts, resets, claims and board invites."""
+    token = auth_service.issue_token(db, person, "password_reset", ttl=ttl)
     db.commit()
+    lifetime = _lifetime(ttl or auth_service.TOKEN_TTL["password_reset"])
     email_service.send_transactional(
         person.email,
         "Set your Kiowa Gun Club password",
         f"<p>Hi {html.escape(person.first_name)},</p><p>{intro}</p>"
         + email_service.button(_link(app, "/reset-password", token), "Set my password")
-        + "<p>This link expires in 1 hour. If you didn't ask for this, you can ignore it — nothing changes until the link is used.</p>",
+        + f"<p>This link expires in {lifetime}. If you didn't ask for this, you can ignore it — nothing changes until the link is used.</p>",
     )
 
 
@@ -153,10 +151,11 @@ def board_session_payload(person: Person, csrf_token: str) -> BoardSessionOut:
              dependencies=[Depends(rate_limit("register", 5, 600))])
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Message:
     """Always answers the same way, so registration can't be used to discover
-    which emails have accounts. Existing contacts claim their record by
-    email link instead of setting a password here."""
-    if problem := validate_new_password(payload.password):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"message": problem, "errors": {"password": problem}})
+    which emails have accounts. Nobody sets a password here: new accounts and
+    existing contacts alike choose theirs from a link emailed to the address, which
+    also verifies it. (Letting the registrant pick the password up front allowed
+    someone to register another person's address and keep a working login once
+    that person clicked the verification link.)"""
     existing = auth_service.find_person_by_email(db, payload.email)
     if existing is None:
         person = Person(
@@ -166,11 +165,13 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Message
             phone=payload.phone,
             membership_status="non_member",
         )
-        auth_service.set_password(db, person, payload.password)
         db.add(person)
         db.flush()
         audit.record(db, actor=person, action="account.registered", entity_type="person", entity_id=person.id)
-        send_verification_email(db, person)
+        send_password_link(
+            db, person, "portal", ttl=auth_service.ACCOUNT_SETUP_TTL,
+            intro="Thanks for setting up a Kiowa Gun Club account. Use the link below to choose your password and confirm this email address.",
+        )
     elif not auth_service.recently_issued(db, existing, "password_reset"):
         intro = (
             "Someone (hopefully you) tried to create a Kiowa Gun Club account with this email, but you already have one. "
@@ -259,28 +260,29 @@ def _change_password(db: Session, person: Person, session_id: str, payload: Chan
 
 
 @router.post("/email/verify", response_model=Message, dependencies=[Depends(rate_limit("verify", 20, 600))])
-def verify_email(payload: TokenOnly, db: Session = Depends(get_db)) -> Message:
-    row = auth_service.consume_token(db, payload.token, ("email_verification",))
-    if row is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="This verification link is invalid or has expired.")
-    person = db.get(Person, row.person_id)
-    assert person is not None
-    person.email_verified_at = person.email_verified_at or now_utc()
-    db.commit()
-    return Message(message="Your email is verified. You can sign in now.")
+def verify_email(payload: TokenOnly) -> Message:
+    """Retired. Addresses are now verified by the link that sets the account's password.
+    Old verification emails still point here, so they get a clear answer instead of an
+    error page, and (unlike before) they no longer verify an account whose password was
+    chosen by whoever registered it."""
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        detail="This link is out of date. Set up your account again to get a new one: use “Set up your account” on the sign-in page.",
+    )
 
 
 @router.post("/email/resend", response_model=Message, dependencies=[Depends(rate_limit("resend", 5, 600))])
 def resend_verification(payload: EmailOnly, db: Session = Depends(get_db)) -> Message:
     person = auth_service.find_person_by_email(db, payload.email)
-    if (
-        person is not None
-        and person.email_verified_at is None
-        and person.password_hash is not None
-        and not auth_service.recently_issued(db, person, "email_verification")
-    ):
-        send_verification_email(db, person)
-    return Message(message="If that account still needs verification, we've sent a new link.")
+    # An unverified account gets a link to (re)choose its password rather than a bare
+    # verification link, so an address registered by someone else can't keep a password
+    # the real owner never chose.
+    if person is not None and person.email_verified_at is None and not auth_service.recently_issued(db, person, "password_reset"):
+        send_password_link(
+            db, person, "portal", ttl=auth_service.ACCOUNT_SETUP_TTL,
+            intro="Use the link below to choose your password and confirm this email address.",
+        )
+    return Message(message="If that account still needs setting up, we've sent a new link.")
 
 
 # ---------------------------------------------------------------------------

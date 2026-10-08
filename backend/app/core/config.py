@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 8
     remember_session_days: int = 30
     trust_proxy_headers: bool = True
+    # How many proxies sit between the internet and the API and append to X-Forwarded-For.
+    # Render's load balancer alone is 1; add 1 more if the API domain is also behind Cloudflare's proxy.
+    trusted_proxy_count: int = Field(default=1, ge=1, le=5)
 
     # Stripe
     stripe_secret_key: str = ""

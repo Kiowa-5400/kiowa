@@ -380,6 +380,15 @@ def test_termination_sweep_runs_once_and_keeps_history(api, db):
     assert db.scalar(select(Document).where(Document.person_id == person.id)).purged_at is not None
 
 
+def test_february_29_cutoff_is_honored_every_year(db):
+    settings_row = db.get(SiteSettings, 1)
+    settings_row.renewal_cutoff_month, settings_row.renewal_cutoff_day = 2, 29
+    assert renewal.cutoff_date(settings_row, 2028) == date(2028, 2, 29)
+    assert renewal.cutoff_date(settings_row, 2029) == date(2029, 2, 28)  # used to raise ValueError
+    assert renewal.next_cutoff_after_payment(settings_row, None, date(2028, 10, 1)) == date(2029, 2, 28)
+    assert renewal.current_cycle_cutoff(settings_row, date(2029, 1, 1)) == date(2029, 2, 28)
+
+
 def test_nra_expiration_check(db):
     person = _person(db, "nra@example.com", nra_expiration_date=date.today() - timedelta(days=1))
     assert renewal.run_nra_expiration_check(db) == 1

@@ -30,6 +30,12 @@ SIGNATURES = {
     "image/heic": lambda h: h[4:8] == b"ftyp" and h[8:12] in (b"heic", b"heix", b"mif1"),
 }
 
+# Other content types browsers use for the same format (iPhones label .heif photos "image/heif").
+DECLARED_ALIASES = {
+    "image/jpeg": ("image/jpg", "image/pjpeg"),
+    "image/heic": ("image/heif", "image/heic-sequence", "image/heif-sequence"),
+}
+
 EXTENSIONS = {
     "application/pdf": (".pdf",),
     "image/jpeg": (".jpg", ".jpeg"),
@@ -93,9 +99,7 @@ async def validate_upload(
         raise _bad(f"{label} must be a {describe(allowed)} file.")
     # The declared type is advisory, but an explicit mismatch is suspicious.
     declared = (upload.content_type or "").split(";")[0].strip().lower()
-    if declared and declared not in {"application/octet-stream", detected} and not (
-        declared == "image/jpg" and detected == "image/jpeg"
-    ):
+    if declared and declared not in {"application/octet-stream", detected, *DECLARED_ALIASES.get(detected, ())}:
         raise _bad(f"{label} doesn't look like a valid {describe(frozenset({detected}))} file.")
     if extension and extension not in EXTENSIONS[detected]:
         raise _bad(f"{label} has the wrong file extension for its contents.")

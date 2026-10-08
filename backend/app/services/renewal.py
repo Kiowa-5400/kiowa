@@ -8,6 +8,7 @@ drives the 45/15-day reminders and the annual termination sweep.
 
 from __future__ import annotations
 
+import calendar
 import html
 import logging
 from dataclasses import dataclass, field
@@ -41,7 +42,10 @@ REMINDER_THRESHOLDS = (15, 45)  # ascending: the smallest window a member is ins
 
 
 def cutoff_date(settings_row: SiteSettings, year: int) -> date:
-    return date(year, settings_row.renewal_cutoff_month, settings_row.renewal_cutoff_day)
+    month, day = settings_row.renewal_cutoff_month, settings_row.renewal_cutoff_day
+    # A February 29 cutoff falls on the 28th in years that have no 29th.
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(day, last_day))
 
 
 def next_cutoff_after_payment(settings_row: SiteSettings, current_renewal_date: date | None, today: date) -> date:
