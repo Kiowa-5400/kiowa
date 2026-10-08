@@ -87,8 +87,10 @@ function TypeStep({ form, profile, application, requested, onStarted }: {
   requested: 'renewal' | 'waiting_list' | null;
   onStarted: (application: Application) => void;
 }) {
-  const suggested = profile.membership_status === 'member' || profile.membership_status === 'expired' ? 'renewal' : 'waiting_list';
-  const [type, setType] = useState<'renewal' | 'waiting_list'>(application?.application_type ?? requested ?? suggested);
+  // Renewal skips the waiting list, so the API only allows it for people the club already has as members.
+  const canRenew = profile.membership_status !== 'non_member' && profile.membership_status !== 'waiting_list';
+  const suggested = canRenew ? 'renewal' : 'waiting_list';
+  const [type, setType] = useState<'renewal' | 'waiting_list'>(application?.application_type ?? (requested === 'renewal' && !canRenew ? null : requested) ?? suggested);
   const start = useAction(async () => {
     const created = await api<Application>('/api/applications', { body: { application_type: type } });
     onStarted(created);
@@ -99,11 +101,15 @@ function TypeStep({ form, profile, application, requested, onStarted }: {
       <FormErrors error={start.error} />
       <fieldset className="option-grid">
         <legend className="visually-hidden">Application type</legend>
-        <label className={`option ${type === 'renewal' ? 'selected' : ''}`}>
-          <input type="radio" name="type" value="renewal" checked={type === 'renewal'} onChange={() => setType('renewal')} />
+        <label className={`option ${type === 'renewal' ? 'selected' : ''} ${!canRenew ? 'disabled' : ''}`}>
+          <input type="radio" name="type" value="renewal" checked={type === 'renewal'} disabled={!canRenew} onChange={() => setType('renewal')} />
           <span>
             <strong>Renew my membership</strong>
-            <span className="small muted" style={{ display: 'block' }}>For current members. Dues are {formatMoney(form.dues_amount)} per year.</span>
+            <span className="small muted" style={{ display: 'block' }}>
+              {canRenew
+                ? `For current members. Dues are ${formatMoney(form.dues_amount)} per year.`
+                : "For people who are already club members. If you're new, apply for the waiting list. If you are a member and this is unavailable, contact the club so they can link your account to your membership record."}
+            </span>
           </span>
         </label>
         <label className={`option ${type === 'waiting_list' ? 'selected' : ''} ${!form.accepting_waiting_list ? 'disabled' : ''}`}>

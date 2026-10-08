@@ -28,6 +28,8 @@ TOKEN_TTL = {
     "email_verification": timedelta(hours=24),
     "board_invite": timedelta(days=7),
 }
+# A brand-new account sets its password from the emailed link, so that link lives longer than a reset.
+ACCOUNT_SETUP_TTL = timedelta(hours=24)
 # Don't email the same inbox another reset link more often than this.
 RESEND_COOLDOWN = timedelta(minutes=2)
 
@@ -159,8 +161,9 @@ def purge_expired_sessions(db: Session) -> int:
 # ---------------------------------------------------------------------------
 
 
-def issue_token(db: Session, person: Person, purpose: str) -> str:
-    """Invalidates earlier unused tokens of the same purpose and issues a new one."""
+def issue_token(db: Session, person: Person, purpose: str, *, ttl: timedelta | None = None) -> str:
+    """Invalidates earlier unused tokens of the same purpose and issues a new one.
+    ``ttl`` overrides the purpose's default lifetime (e.g. first-time account setup)."""
     db.execute(
         update(AuthToken)
         .where(AuthToken.person_id == person.id, AuthToken.purpose == purpose, AuthToken.used_at.is_(None))
@@ -172,15 +175,21 @@ def issue_token(db: Session, person: Person, purpose: str) -> str:
             person_id=person.id,
             purpose=purpose,
             token_hash=hash_token(token),
-            expires_at=now_utc() + TOKEN_TTL[purpose],
+            expires_at=now_utc() + (ttl or TOKEN_TTL[purpose]),
         )
     )
     return token
 
 
 def recently_issued(db: Session, person: Person, purpose: str) -> bool:
+    """Whether a link of this kind was emailed moments ago and is still waiting to be used.
+    A link that has been used no longer holds anyone back (the person just set their password
+    and may immediately need another, e.g. a reset); requesting links repeatedly always leaves
+    the latest one unused, so the cooldown still stops email floods."""
     latest: datetime | None = db.scalar(
-        select(func.max(AuthToken.created_at)).where(AuthToken.person_id == person.id, AuthToken.purpose == purpose)
+        select(func.max(AuthToken.created_at)).where(
+            AuthToken.person_id == person.id, AuthToken.purpose == purpose, AuthToken.used_at.is_(None)
+        )
     )
     return latest is not None and now_utc() - latest < RESEND_COOLDOWN
 

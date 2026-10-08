@@ -25,10 +25,11 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 
 
 def register_and_verify(api: Api, email: str, first: str = "Pat", last: str = "Shooter") -> None:
-    response = api.post("/api/auth/register", json={"first_name": first, "last_name": last, "email": email, "password": PASSWORD})
+    response = api.post("/api/auth/register", json={"first_name": first, "last_name": last, "email": email})
     assert response.status_code == 202, response.text
-    token = last_token(email, "/verify-email")
-    assert api.post("/api/auth/email/verify", json={"token": token}).status_code == 200
+    # The emailed link is where the password gets chosen; using it also verifies the address.
+    token = last_token(email, "/reset-password")
+    assert api.post("/api/auth/password/reset", json={"token": token, "password": PASSWORD}).status_code == 200
 
 
 def sign_in(api: Api, email: str, password: str = PASSWORD) -> dict[str, Any]:
@@ -54,6 +55,18 @@ FULL_PROFILE = {
     "nra_number": "123456789",
     "nra_expiration_date": (date.today() + timedelta(days=400)).isoformat(),
 }
+
+
+def make_existing_member(api: Api) -> None:
+    """Renewal is for people the club already has as members, so tests that renew first
+    turn the signed-in account into one (as importing the roster or a past payment would)."""
+    from app.db.session import get_sessionmaker
+
+    email = api.get("/api/me").json()["email"]
+    with get_sessionmaker()() as session:
+        person = session.query(Person).filter(Person.email == email).one()
+        person.membership_status = "member"
+        session.commit()
 
 
 def create_board_user(db: Session, email: str, role: str = "president", password: str = PASSWORD) -> Person:
@@ -147,6 +160,8 @@ def post_webhook(api: Api, payload: bytes, signature: str | None = None):  # noq
 
 
 def start(api: Api, kind: str = "renewal") -> dict[str, Any]:
+    if kind == "renewal":
+        make_existing_member(api)
     response = api.post("/api/applications", json={"application_type": kind})
     assert response.status_code == 201, response.text
     return response.json()

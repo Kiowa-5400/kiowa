@@ -66,7 +66,7 @@ export function LoginPage() {
 }
 
 export function RegisterPage() {
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '', password: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', phone: '' });
   const [done, setDone] = useState<string | null>(null);
   const register = useAction(async () => {
     const result = await api<{ message: string }>('/api/auth/register', { body: { ...form, phone: form.phone || null } });
@@ -78,7 +78,7 @@ export function RegisterPage() {
     return (
       <AuthCard title="Check your email">
         <Alert kind="success">{done}</Alert>
-        <p className="muted">If the club already has your email on file, the email will have a link to choose your password instead. Didn't get anything in a few minutes? Check your spam folder, or contact the club.</p>
+        <p className="muted">The link in the email is where you choose your password. Didn't get anything in a few minutes? Check your spam folder, or contact the club.</p>
         <Link to="/login">Back to sign in</Link>
       </AuthCard>
     );
@@ -86,7 +86,7 @@ export function RegisterPage() {
   return (
     <AuthCard title="Set up your account">
       <p className="muted">Already a member? Use the email address the club has for you, and we'll connect your account to your membership record. New to the club? Set up an account to apply for the waiting list.</p>
-      <p className="muted">We'll email you a link to confirm your address before you can sign in.</p>
+      <p className="muted">We'll email you a link to confirm your address and choose your password. You can sign in once you've done that.</p>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void register.run(); }} noValidate>
         <FormErrors error={register.error} fieldErrors={register.fieldErrors} />
         <div className="grid-2">
@@ -95,8 +95,6 @@ export function RegisterPage() {
         </div>
         <TextField label="Email" type="email" autoComplete="email" required value={form.email} onChange={set('email')} error={register.fieldErrors.email} />
         <TextField label="Mobile phone" type="tel" autoComplete="tel" inputMode="tel" value={form.phone} onChange={set('phone')} error={register.fieldErrors.phone} />
-        <TextField label="Password" type="password" autoComplete="new-password" required minLength={10} hint="At least 10 characters."
-          value={form.password} onChange={set('password')} error={register.fieldErrors.password} />
         <button className="btn btn-primary btn-block" type="submit" disabled={register.busy}>{register.busy ? 'Setting up…' : 'Set up my account'}</button>
       </form>
       <p className="small">Already have an account? <Link to="/login">Log in</Link></p>

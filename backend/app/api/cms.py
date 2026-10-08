@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -424,7 +424,9 @@ def update_membership_settings(payload: MembershipSettingsUpdate, request: Reque
                                db: Session = Depends(get_db)) -> dict[str, object]:
     row = membership.site_settings(db)
     try:
-        club_today().replace(month=payload.renewal_cutoff_month, day=payload.renewal_cutoff_day)
+        # Checked against a leap year so the answer doesn't depend on the year it is saved in;
+        # a February 29 cutoff is honored as February 28 in years without one (services/renewal.py).
+        date(2024, payload.renewal_cutoff_month, payload.renewal_cutoff_day)
     except ValueError as exc:
         raise membership.WorkflowError("That renewal cutoff isn't a real calendar date.") from exc
     if payload.cleanup_discount_amount >= payload.dues_amount:

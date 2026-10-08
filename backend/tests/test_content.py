@@ -60,6 +60,10 @@ def test_settings_permissions_and_rules_versioning(api, new_api, db):
     assert api.get("/api/application/form").json()["dues_amount"] == "160.00"
     bad_date = api.put("/api/board/settings/membership", json={**payload, "renewal_cutoff_month": 2, "renewal_cutoff_day": 30})
     assert bad_date.status_code == 422
+    # February 29 is a real date; it is honored as the 28th in years without one, whatever year it is saved in.
+    leap_day = api.put("/api/board/settings/membership", json={**payload, "renewal_cutoff_month": 2, "renewal_cutoff_day": 29})
+    assert leap_day.status_code == 200
+    api.put("/api/board/settings/membership", json=payload)
 
     rules = api.put("/api/board/settings/rules", json={"range_rules": ["Rule one", "Rule two"], "agreement_clause": "I agree.", "reporting_clause": ""}).json()
     assert rules["rules_version"] == date.today().isoformat()

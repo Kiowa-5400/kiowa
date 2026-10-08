@@ -20,6 +20,7 @@ from tests.helpers import (
     FakeGateway,
     board,
     completed_event,
+    make_existing_member,
     member,
     post_webhook,
     stripe_signature,
@@ -36,6 +37,8 @@ def gateway(monkeypatch):
 
 
 def start(api, kind: str = "renewal") -> dict:
+    if kind == "renewal":
+        make_existing_member(api)
     response = api.post("/api/applications", json={"application_type": kind})
     assert response.status_code == 201, response.text
     return response.json()
@@ -123,6 +126,29 @@ def test_draft_cannot_switch_to_closed_waiting_list(api, db):
     assert api.get(f"/api/applications/{application['id']}").json()["application_type"] == "renewal"
 
 
+def test_renewal_is_only_for_existing_members(api, db):
+    """A brand-new account can't take the renewal route around the waiting list and background check."""
+    member(api, "newcomer@example.com", **FULL_PROFILE)
+    refused = api.post("/api/applications", json={"application_type": "renewal"})
+    assert refused.status_code == 409 and "waiting list" in refused.json()["detail"]
+    assert api.get("/api/applications").json() == []
+    # The waiting list is the way in; and a draft can't be switched over to renewal either.
+    draft = api.post("/api/applications", json={"application_type": "waiting_list"})
+    assert draft.status_code == 201
+    switch = api.patch(f"/api/applications/{draft.json()['id']}", json={"application_type": "renewal"})
+    assert switch.status_code == 409
+    assert api.get(f"/api/applications/{draft.json()['id']}").json()["application_type"] == "waiting_list"
+
+
+@pytest.mark.parametrize("status", ["member", "expired", "terminated"])
+def test_current_and_former_members_can_renew(api, db, status):
+    member(api, f"{status}@example.com", **FULL_PROFILE)
+    person = db.scalar(select(Person).where(Person.email == f"{status}@example.com"))
+    person.membership_status = status
+    db.commit()
+    assert api.post("/api/applications", json={"application_type": "renewal"}).status_code == 201
+
+
 def test_only_one_open_application(api):
     member(api, "one@example.com", **FULL_PROFILE)
     first = start(api)
@@ -150,6 +176,18 @@ def test_upload_validates_signature_type_extension_and_size(api):
     assert not_applicable.status_code == 400
     ok = upload(api, application["id"], "nra_proof", PNG, "card.png", "image/png")
     assert ok.status_code == 201 and ok.json()["mime_type"] == "image/png"
+
+
+def test_iphone_heic_and_heif_photos_are_accepted(api):
+    """Browsers label .heic photos image/heic and .heif ones image/heif; both are the same format."""
+    member(api, "iphone@example.com", **FULL_PROFILE)
+    application = start(api)
+    heic = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 64
+    for filename, declared in (("IMG_1.heic", "image/heic"), ("IMG_2.heif", "image/heif"), ("IMG_3.HEIC", "application/octet-stream")):
+        response = upload(api, application["id"], "nra_proof", heic, filename, declared)
+        assert response.status_code == 201, (filename, response.text)
+    # An honest mismatch is still refused.
+    assert upload(api, application["id"], "nra_proof", heic, "IMG_4.heic", "image/png").status_code == 400
 
 
 def test_document_storage_is_private_and_owner_scoped(api, new_api, db):
