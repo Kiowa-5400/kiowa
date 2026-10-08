@@ -6,6 +6,7 @@ import { AboutPage } from './pages/AboutPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { ContactPage } from './pages/ContactPage';
 import { HomePage } from './pages/HomePage';
+import { PrivacyPage, TermsPage } from './pages/LegalPages';
 import { MatchesPage } from './pages/MatchesPage';
 import { MembershipPage } from './pages/MembershipPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -29,6 +30,8 @@ const PAGES: Record<string, ComponentType> = {
   '/rules': RulesPage,
   '/membership': MembershipPage,
   '/contact': ContactPage,
+  '/terms': TermsPage,
+  '/privacy': PrivacyPage,
 };
 
 export function App() {
@@ -99,6 +102,8 @@ function Footer() {
             {site.footer_links.map((link) => <li key={link.url}><a href={link.url}>{link.label}</a></li>)}
             <li><a href={PORTAL_URL}>Member portal</a></li>
             <li><a href={BOARD_URL}>Board login</a></li>
+            <li><Link to="/terms">Terms and Conditions</Link></li>
+            <li><Link to="/privacy">Privacy Policy</Link></li>
           </ul>
         </nav>
       </div>

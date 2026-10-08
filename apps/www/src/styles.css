@@ -102,3 +102,8 @@
   .month-grid, .legend, .month-empty { display: none; }
   .agenda { display: block; }
 }
+
+/* Terms and Privacy pages */
+.legal { max-width: 780px; }
+.legal h2 { font-size: 1.2rem; margin-top: var(--space-5); }
+.legal h2:first-child { margin-top: 0; }

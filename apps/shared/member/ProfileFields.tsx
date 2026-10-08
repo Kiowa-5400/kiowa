@@ -1,4 +1,5 @@
 import { Checkbox, TextField } from '@shared/ui';
+import { WWW_URL } from '@shared/urls';
 
 export type ProfileForm = {
   first_name: string;
@@ -56,7 +57,12 @@ export function ProfileFields({ form, onChange, errors, nraRequired }: {
           checked={form.sms_opt_in}
           onChange={(e) => onChange({ ...form, sms_opt_in: e.target.checked })}
           label="Yes, text me about matches, events, and dues renewal reminders."
-          hint="Optional — it won't affect your membership. Message and data rates may apply; frequency varies. Reply STOP to any text to opt out, or change this anytime here. We never sell or share your number."
+          hint={<>
+            Optional — it won't affect your membership. Message frequency varies. Message and data rates may apply.
+            Reply HELP for help or STOP to any text to opt out, or change this anytime here. We never sell or share your
+            number. See our <a href={`${WWW_URL}/terms#text-messages`} target="_blank" rel="noopener">Terms</a> and{' '}
+            <a href={`${WWW_URL}/privacy`} target="_blank" rel="noopener">Privacy Policy</a>.
+          </>}
         />
       </fieldset>
       <fieldset className="stack">

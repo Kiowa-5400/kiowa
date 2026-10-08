@@ -7,7 +7,7 @@
 const trim = (url: string) => url.replace(/\/+$/, '');
 const PROD = import.meta.env.PROD;
 
-export const WWW_URL: string = trim(import.meta.env.VITE_WWW_URL || (PROD ? 'https://kiowagunclub.org' : 'http://localhost:4173'));
+export const WWW_URL: string = trim(import.meta.env.VITE_WWW_URL || (PROD ? 'https://www.kiowagunclub.org' : 'http://localhost:4173'));
 export const PORTAL_URL: string = trim(import.meta.env.VITE_PORTAL_APP_URL || (PROD ? 'https://portal.kiowagunclub.org' : 'http://localhost:5174'));
 export const APPLY_URL: string = trim(import.meta.env.VITE_APPLY_APP_URL || (PROD ? 'https://apply.kiowagunclub.org' : 'http://localhost:5173'));
 export const BOARD_URL: string = trim(import.meta.env.VITE_BOARD_APP_URL || (PROD ? 'https://board.kiowagunclub.org' : 'http://localhost:4174'));
