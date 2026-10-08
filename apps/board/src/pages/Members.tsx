@@ -64,7 +64,7 @@ export function MembersPage() {
             {groups.data?.map((g) => <option key={g.key} value={g.key}>{g.label} ({g.count})</option>)}
           </select></div>
         <div className="field"><label htmlFor="m-sort">Sort by</label>
-          <select id="m-sort" value={sort} onChange={(e) => setSort(e.target.value)}>
+          <select id="m-sort" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }}>
             <option value="name">Last name</option><option value="renewal">Renewal date</option><option value="recent">Newest first</option>
           </select></div>
       </div>

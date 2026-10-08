@@ -14,8 +14,14 @@ function AuthCard({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
+/** ?next= is only ever a path on this site, never a full URL, so it can't send anyone elsewhere. */
+function safePath(next: string | null): string | null {
+  return next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : null;
+}
+
 export function LoginPage() {
   const { signIn } = useAuth();
+  const { path, query } = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
@@ -27,7 +33,9 @@ export function LoginPage() {
       setNeedsVerification(error instanceof Error && /verify/i.test(error.message));
       throw error;
     }
-    navigate('/', { replace: true });
+    // Shown in place of a members-only page (e.g. an emailed /applications/12/pay link),
+    // signing in reveals that page. Only the /login page itself moves on.
+    if (path === '/login') navigate(safePath(query.get('next')) ?? '/', { replace: true });
   });
   const resend = useAction(() => api('/api/auth/email/resend', { body: { email } }));
 

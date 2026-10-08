@@ -33,7 +33,8 @@ function ReviewQueue() {
   const [page, setPage] = useState(1);
   const queue = useAsync((signal) => api<Page<QueueItem>>('/api/board/documents', { signal, query: { review_status: status, page } }), [status, page]);
   const review = useAction(async (id: number, review_status: string) => {
-    const notes = review_status === 'rejected' ? window.prompt('Tell the member why (optional):') ?? '' : '';
+    const notes = review_status === 'rejected' ? window.prompt('Tell the member why (optional):') : '';
+    if (notes === null) return; // Cancelled.
     await api(`/api/board/documents/${id}/review`, { body: { review_status, notes } });
     queue.reload();
   });

@@ -63,7 +63,7 @@ export function DocumentUpload({ applicationId, requirement, documents, editable
           <label htmlFor={inputId} className={`field-label ${requirement.required ? 'required' : ''}`}>{requirement.label}</label>
           <p className="small muted" style={{ margin: 0 }}>{requirement.description}</p>
         </div>
-        {mine.length > 0 && <span className="badge badge-success">Uploaded</span>}
+        {mine.some((d) => d.review_status !== 'rejected') && <span className="badge badge-success">Uploaded</span>}
       </div>
 
       {mine.length > 0 && (

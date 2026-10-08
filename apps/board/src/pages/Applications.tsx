@@ -100,13 +100,17 @@ export function ApplicationDetail({ id }: { id: number }) {
   const [declineReason, setDeclineReason] = useState('');
   const [sendPayment, setSendPayment] = useState(true);
 
+  // Resolves true only on success (run() reports failures through act.error instead of throwing).
   const act = useAction(async (path: string, body: unknown, done: string) => {
+    setMessage(null);
     await api(`/api/board/applications/${id}/${path}`, { method: 'POST', body });
     setMessage(done);
     detail.reload();
+    return true;
   });
   const review = useAction(async (docId: number, review_status: string) => {
-    const notes = review_status === 'rejected' ? window.prompt('Tell the applicant why (optional):') ?? '' : '';
+    const notes = review_status === 'rejected' ? window.prompt('Tell the applicant why (optional):') : '';
+    if (notes === null) return; // Cancelled.
     await api(`/api/board/documents/${docId}/review`, { body: { review_status, notes } });
     detail.reload();
   });
@@ -194,7 +198,7 @@ export function ApplicationDetail({ id }: { id: number }) {
                 <div className="stack-sm">
                   <TextArea label="What do they need to send or fix?" value={infoText} onChange={(e) => setInfoText(e.target.value)} />
                   <button type="button" className="btn" disabled={!infoText.trim() || act.busy}
-                    onClick={() => void act.run('request-info', { message: infoText }, 'The applicant was emailed your request.').then(() => setInfoText(''))}>Send request</button>
+                    onClick={() => void act.run('request-info', { message: infoText }, 'The applicant was emailed your request.').then((ok) => ok && setInfoText(''))}>Send request</button>
                 </div>
               </details>
               <details>
@@ -213,7 +217,7 @@ export function ApplicationDetail({ id }: { id: number }) {
             <p className="small muted">Only board members see these.</p>
             {a.notes.map((n) => <blockquote key={n.id} className="note"><p>{n.body}</p><footer className="small muted">{n.author_name} · {formatDateTime(n.created_at)}</footer></blockquote>)}
             <TextArea label="Add a note" value={note} onChange={(e) => setNote(e.target.value)} />
-            <div><button type="button" className="btn" disabled={!note.trim()} onClick={() => void act.run('notes', { body: note }, 'Note added.').then(() => setNote(''))}>Add note</button></div>
+            <div><button type="button" className="btn" disabled={!note.trim() || act.busy} onClick={() => void act.run('notes', { body: note }, 'Note added.').then((ok) => ok && setNote(''))}>Add note</button></div>
           </section>
         </div>
 

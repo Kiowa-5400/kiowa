@@ -328,6 +328,8 @@ export function PayPage({ id }: { id: number }) {
   );
 }
 
+const MAX_CHECKS = 12;
+
 /** Stripe sends the member back here. We only report what the server has recorded from Stripe's confirmation. */
 export function PaymentReturnPage() {
   usePageTitle('Payment');
@@ -339,7 +341,8 @@ export function PaymentReturnPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    // Each check asks Stripe directly, so stop after a while (or on an error) instead of polling forever.
+    if (!sessionId || error || attempts >= MAX_CHECKS) return undefined;
     if (status && status.status !== 'pending') return undefined;
     const timer = window.setTimeout(async () => {
       try {
@@ -353,15 +356,16 @@ export function PaymentReturnPage() {
       setAttempts((n) => n + 1);
     }, attempts === 0 ? 0 : 2500);
     return () => window.clearTimeout(timer);
-  }, [sessionId, status, attempts, refresh]);
+  }, [sessionId, status, attempts, error, refresh]);
 
   return (
     <section className="card stack pay-card" aria-live="polite">
       <h1>Payment</h1>
       {error && <Alert kind="error">{error}</Alert>}
-      {!status && !error && <Loading label="Checking your payment…" />}
-      {status?.status === 'pending' && attempts < 12 && <Loading label="Waiting for confirmation from Stripe…" />}
-      {status?.status === 'pending' && attempts >= 12 && (
+      {!sessionId && <Alert kind="error">This page is missing its payment reference. Check your membership page for your payment status.</Alert>}
+      {sessionId && !status && !error && <Loading label="Checking your payment…" />}
+      {status?.status === 'pending' && attempts < MAX_CHECKS && <Loading label="Waiting for confirmation from Stripe…" />}
+      {status?.status === 'pending' && attempts >= MAX_CHECKS && (
         <Alert kind="info">We're still waiting for Stripe to confirm your payment. This can take a few minutes. We'll email your receipt when it's confirmed — you can safely close this page.</Alert>
       )}
       {status?.status === 'paid' && (

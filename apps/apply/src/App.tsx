@@ -48,7 +48,9 @@ export function App() {
   } else if (checking) {
     content = <Loading />;
   } else if (!profile) {
-    content = <LeaveTo href={`${PORTAL_URL}/`} />;
+    // Sign in on the portal, then come back through its /apply route with the same
+    // ?type=/?step=, so a renewal-reminder link still lands on the renewal form.
+    content = <LeaveTo href={`${PORTAL_URL}/login?next=${encodeURIComponent(`/apply${window.location.search}`)}`} />;
   } else {
     content = <ApplyWizard />;
   }
