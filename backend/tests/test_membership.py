@@ -149,6 +149,41 @@ def test_current_and_former_members_can_renew(api, db, status):
     assert api.post("/api/applications", json={"application_type": "renewal"}).status_code == 201
 
 
+def test_paid_up_members_cannot_renew_again_until_the_window_opens(api, db):
+    from app.core.timeutil import club_today
+
+    member(api, "paidup@example.com", **FULL_PROFILE)
+    person = db.scalar(select(Person).where(Person.email == "paidup@example.com"))
+    person.membership_status = "member"
+    today = club_today()
+
+    # Already paid for the coming year: no second renewal.
+    person.renewal_date = today + timedelta(days=200)
+    db.commit()
+    refused = api.post("/api/applications", json={"application_type": "renewal"})
+    assert refused.status_code == 409 and "already paid through" in refused.json()["detail"]
+    assert api.get("/api/applications").json() == []
+
+    # Inside the 45-day reminder window before the paid-through date, renewal opens.
+    person.renewal_date = today + timedelta(days=45)
+    db.commit()
+    assert api.post("/api/applications", json={"application_type": "renewal"}).status_code == 201
+
+
+def test_renewal_started_before_paying_cannot_be_paid_twice(api, db):
+    from app.core.timeutil import club_today
+    from app.services.membership import evaluate_payment_eligibility
+
+    member(api, "twice@example.com", **FULL_PROFILE)
+    draft = start(api)
+    person = db.scalar(select(Person).where(Person.email == "twice@example.com"))
+    # Meanwhile the treasurer recorded a check that paid through next year.
+    person.renewal_date = club_today() + timedelta(days=300)
+    db.commit()
+    eligibility = evaluate_payment_eligibility(db, db.get(Application, draft["id"]))
+    assert not eligibility.eligible and any("already paid through" in r for r in eligibility.reasons)
+
+
 def test_only_one_open_application(api):
     member(api, "one@example.com", **FULL_PROFILE)
     first = start(api)
