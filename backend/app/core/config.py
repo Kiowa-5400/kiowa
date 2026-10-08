@@ -62,18 +62,12 @@ class Settings(BaseSettings):
     email_from_name: str = "Kiowa Gun Club"
     email_reply_to: str = ""
 
-    # SMS
     # SMS: "httpsms" = the httpSMS Android app sends from the club's phone (httpsms.com);
     # "gateway" = Veriphone carrier lookup + Resend to the carrier email-to-SMS gateway.
-    sms_provider: Literal["httpsms", "twilio", "gateway", "console", "disabled"] = "console"
-    # Optional backup: a text the main provider refuses is sent through this one instead.
-    sms_fallback_provider: Literal["", "httpsms", "twilio", "gateway"] = ""
+    sms_provider: Literal["httpsms", "gateway", "console", "disabled"] = "console"
     httpsms_api_key: str = ""
     httpsms_from_number: str = ""  # the club phone running the httpSMS app, e.g. +16205550100
-    httpsms_webhook_signing_key: str = ""  # signs delivery-status webhooks (HS256 JWT)
-    twilio_account_sid: str = ""
-    twilio_auth_token: str = ""
-    twilio_messaging_service_sid: str = ""
+    httpsms_webhook_signing_key: str = ""  # signs delivery and reply webhooks (HS256 JWT)
     veriphone_api_key: str = ""
     sms_from_name: str = "Kiowa Gun Club"
     sms_from_address: str = ""  # defaults to EMAIL_FROM_ADDRESS
@@ -139,7 +133,7 @@ class Settings(BaseSettings):
         if self.email_provider == "console":
             problems.append("EMAIL_PROVIDER must be 'resend' (or 'disabled') in production")
         if self.sms_provider == "console":
-            problems.append("SMS_PROVIDER must be 'twilio', 'httpsms', 'gateway' or 'disabled' in production")
+            problems.append("SMS_PROVIDER must be 'httpsms', 'gateway' or 'disabled' in production")
         # Missing SMS credentials don't block startup: the provider logs an error and
         # texting stays off (services/sms.py) until they're set.
         if problems:

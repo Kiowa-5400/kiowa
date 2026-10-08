@@ -41,8 +41,6 @@ envVarGroups:
       - key: EMAIL_FROM_NAME
         value: Kiowa Gun Club
       # Texts are sent by the httpSMS app on the club's Android phone (httpsms.com).
-      # Once Twilio verifies the club's toll-free number, SMS_PROVIDER=twilio with
-      # SMS_FALLBACK_PROVIDER=httpsms makes the phone the backup instead.
       - key: SMS_PROVIDER
         value: httpsms
       - key: CRON_SECRET
@@ -84,16 +82,6 @@ services:
       - key: EMAIL_FROM_ADDRESS
         sync: false
       - key: EMAIL_REPLY_TO
-        sync: false
-      # Twilio (not used until toll-free verification is approved; when switching,
-      # also pass these three to kiowa-daily-jobs below). Account SID and
-      # auth token from Twilio Console > Account info; the token also verifies Twilio's webhooks.
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      # The Messaging Service (MG...) holding the club's number and A2P campaign.
-      - key: TWILIO_MESSAGING_SERVICE_SID
         sync: false
       # httpSMS (httpsms.com): API key, the club phone's number in +1
       # format (e.g. +16205550100) and the signing key of the webhook pointed at

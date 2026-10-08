@@ -18,7 +18,7 @@ kiowa-gun (Next.js on Cloudflare Workers with D1, R2, Resend and an email-to-SMS
 | Calendar | D1 events, nth-weekday series, image/PDF/link | Same, stored as UTC instants entered in Kansas time; series can be previewed and deleted (future or all); 5 categories |
 | Matches | Discipline, free-text dates, PractiScore link, photo galleries | Real dates and times, discipline grouping, results link, photo upload/reorder/caption |
 | Email | Resend batch, inline images, attachments, open/click/bounce via webhook (secret in URL) | Provider interface (Resend). Group + individual recipients, preview, attachments, images, unsubscribe link + one-click header, Svix-verified webhook analytics; spam complaints auto-unsubscribe |
-| SMS | Carrier email-to-SMS gateways via Veriphone lookup; no delivery receipts | Provider interface (Twilio). Consent enforced in one function, STOP/START replies recorded, delivery status webhooks, MMS picture, carrier-filter word check kept as a suggestion |
+| SMS | Carrier email-to-SMS gateways via Veriphone lookup; no delivery receipts | Provider interface (httpSMS, sent from the club's Android phone). Consent enforced in one function, STOP/START replies recorded, delivery status webhooks, MMS picture, carrier-filter word check kept as a suggestion |
 | Exports | Members CSV | Email list, postal labels, full contact CSV; leadership/treasurer only; formula-injection safe; audited |
 | Audit log | — | Every privileged action, document view and export |
 | Security | Lockout, timing-safe login, Cloudflare rate limiter, magic-byte checks | All kept, plus HttpOnly cookie sessions with CSRF tokens, strict CORS, CSP, HTML sanitization, private object storage, request IDs |

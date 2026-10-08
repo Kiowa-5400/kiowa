@@ -29,7 +29,7 @@ function Contact() {
   );
 }
 
-/** Message program terms required for Twilio toll-free verification. The checkbox is behind sign-in,
+/** Text message program terms. The checkbox is behind sign-in,
  * so its exact wording is quoted here for reviewers; keep it in step with shared/member/ProfileFields.tsx. */
 function TextMessageTerms() {
   const { site } = useSite();
@@ -176,7 +176,7 @@ export function PrivacyPage() {
       <p>Only with service providers that run parts of the services on our behalf, and only what they need:</p>
       <ul>
         <li>Stripe, to process dues payments.</li>
-        <li>Twilio and httpSMS, to deliver text messages.</li>
+        <li>httpSMS, to deliver text messages.</li>
         <li>Resend, to deliver email.</li>
         <li>Render and Neon, which host our website, servers, files and database.</li>
       </ul>

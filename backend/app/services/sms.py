@@ -1,10 +1,8 @@
 """Text messages with consent enforcement.
 
-The production provider is httpSMS: the httpSMS Android app on the club's
-phone sends each message, and delivery status arrives by webhook. Twilio (a
-Messaging Service holding the club's toll-free number) is ready for when its
-verification is approved, with httpSMS as SMS_FALLBACK_PROVIDER. The Veriphone
-carrier-gateway provider remains available.
+The site's texts go through httpSMS: the httpSMS Android app on the club's
+phone sends each message, and delivery status and replies (STOP/START) arrive
+by webhook. The Veriphone carrier-gateway provider remains available.
 
 Consent rule: nothing in this module sends to a person who hasn't opted in.
 """
@@ -25,7 +23,6 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
-from app.core.timeutil import now_utc
 from app.models import Person
 from app.services import email as email_service
 
@@ -130,6 +127,9 @@ class HttpSmsProvider:
         number = to_e164(person.phone)
         if not number:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
+        return self.send_to_number(number, body, media_url)
+
+    def send_to_number(self, number: str, body: str, media_url: str | None = None) -> SmsResult:
         settings = get_settings()
         if not settings.httpsms_api_key or not settings.httpsms_from_number:
             return SmsResult("failed", "httpSMS is not configured.")
@@ -179,42 +179,6 @@ def verify_httpsms_token(signing_key: str, authorization: str, leeway_seconds: i
     return True
 
 
-class TwilioSmsProvider:
-    """Twilio Programmable Messaging provider; delivery is finalized by webhook."""
-
-    name = "twilio"
-
-    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
-        number = to_e164(person.phone)
-        if not number:
-            return SmsResult("failed", "No valid 10-digit mobile number on file.")
-        settings = get_settings()
-        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
-            return SmsResult("failed", "Twilio messaging is not configured.")
-
-        try:
-            from twilio.rest import Client
-
-            kwargs: dict[str, object] = {
-                "body": body,
-                "to": number,
-                "messaging_service_sid": settings.twilio_messaging_service_sid,
-                "status_callback": f"{settings.api_public_url.rstrip('/')}/api/webhooks/sms/twilio",
-            }
-            if media_url:
-                kwargs["media_url"] = [media_url]
-            message = Client(settings.twilio_account_sid, settings.twilio_auth_token).messages.create(**kwargs)
-        except Exception as exc:
-            if getattr(exc, "code", None) == 21610:
-                # They replied STOP to the club's number; Twilio won't text them until they reply START.
-                person.sms_opt_in = False
-                person.sms_opt_out_at = now_utc()
-                return SmsResult("failed", "This number replied STOP; they've been marked as not wanting texts.")
-            logger.exception("twilio_send_failed")
-            return SmsResult("failed", f"Twilio request failed: {exc}")
-        return SmsResult("sent", None, None, message.sid)
-
-
 class GatewaySmsProvider:
     name = "gateway"
     def __init__(self, lookup: CarrierLookup) -> None:
@@ -251,6 +215,8 @@ class ConsoleSmsProvider:
         number = to_e164(person.phone)
         if not number:
             return SmsResult("failed", "No valid 10-digit mobile number on file.")
+        return self.send_to_number(number, body, media_url)
+    def send_to_number(self, number: str, body: str, media_url: str | None = None) -> SmsResult:
         self.outbox.append((number, body))
         logger.info("sms_console_send", extra={"to": number[-4:], "length": len(body)})
         return SmsResult("sent", None, f"{number[2:]}@console.invalid", f"console-sms-{len(self.outbox)}")
@@ -262,34 +228,9 @@ class DisabledSmsProvider:
         return SmsResult("failed", "Text messaging is not configured.")
 
 
-class FallbackSmsProvider:
-    """Sends through the main provider, and through the backup when the main one
-    refuses the text outright (not configured, rejected, unreachable). A text the
-    main provider accepted but later fails to deliver is not resent."""
-
-    def __init__(self, primary: SmsProvider, backup: SmsProvider) -> None:
-        self.primary = primary
-        self.backup = backup
-        self.name = f"{primary.name}+{backup.name}"
-
-    def send(self, person: Person, body: str, media_url: str | None = None) -> SmsResult:
-        result = self.primary.send(person, body, media_url)
-        # A refused number (no valid phone, or they replied STOP) is refused by every provider.
-        if result.ok or not person.sms_opt_in or not to_e164(person.phone):
-            return result
-        logger.warning("sms_fallback", extra={"primary": self.primary.name, "backup": self.backup.name, "error": result.error})
-        backup = self.backup.send(person, body, media_url)
-        if not backup.ok:
-            backup.error = f"{self.primary.name}: {result.error} / {self.backup.name}: {backup.error}"
-        return backup
-
-
 @lru_cache(maxsize=1)
 def get_sms_provider() -> SmsProvider:
-    settings = get_settings()
-    primary = _build_provider(settings.sms_provider)
-    backup = get_backup_sms_provider()
-    return FallbackSmsProvider(primary, backup) if backup is not None else primary
+    return _build_provider(get_settings().sms_provider)
 
 
 def _build_provider(name: str) -> SmsProvider:
@@ -299,11 +240,6 @@ def _build_provider(name: str) -> SmsProvider:
             logger.error("sms_provider_misconfigured", extra={"detail": "HTTPSMS_API_KEY or HTTPSMS_FROM_NUMBER missing"})
             return DisabledSmsProvider()
         return HttpSmsProvider()
-    if name == "twilio":
-        if not settings.twilio_account_sid or not settings.twilio_auth_token or not settings.twilio_messaging_service_sid:
-            logger.error("sms_provider_misconfigured", extra={"detail": "Twilio credentials or Messaging Service SID missing"})
-            return DisabledSmsProvider()
-        return TwilioSmsProvider()
     if name == "gateway":
         if not settings.veriphone_api_key:
             logger.error("sms_provider_misconfigured", extra={"detail": "VERIPHONE_API_KEY missing"})
@@ -312,13 +248,6 @@ def _build_provider(name: str) -> SmsProvider:
     if name == "console":
         return ConsoleSmsProvider()
     return DisabledSmsProvider()
-
-
-@lru_cache(maxsize=1)
-def get_backup_sms_provider() -> SmsProvider | None:
-    settings = get_settings()
-    fallback = settings.sms_fallback_provider
-    return _build_provider(fallback) if fallback and fallback != settings.sms_provider else None
 
 
 def texting_enabled() -> bool:
@@ -341,14 +270,16 @@ def send_to_person(person: Person, body: str, media_url: str | None = None) -> S
     return get_sms_provider().send(person, body, media_url)
 
 
-def resend_with_backup(person: Person, body: str, media_url: str | None = None) -> SmsResult | None:
-    """Resends a text the main provider accepted but couldn't deliver. None when
-    no backup is configured."""
-    backup = get_backup_sms_provider()
-    if backup is None:
+def send_keyword_reply(phone: str | None, body: str) -> SmsResult | None:
+    """Answers a STOP/START/HELP someone just texted to the club phone. The one
+    text sent without checking consent: carriers expect STOP to be confirmed even
+    though the person has just opted out. None when the provider can't text a bare
+    number (the carrier gateway needs a person's carrier)."""
+    number = to_e164(phone)
+    provider = get_sms_provider()
+    if not number or not hasattr(provider, "send_to_number"):
         return None
-    _require_consent(person)
-    return backup.send(person, body, media_url)
+    return provider.send_to_number(number, body)
 
 
 # ---------------------------------------------------------------------------

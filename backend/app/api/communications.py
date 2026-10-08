@@ -26,10 +26,10 @@ from app.services.html import sanitize_html
 from app.services.people import GROUPS, resolve_recipients
 from app.services.storage import get_storage, new_key
 
-logger = logging.getLogger("kiowa.communications")
-
 router = APIRouter(prefix="/api/board", tags=["board: communications"])
 public_router = APIRouter(prefix="/api/public", tags=["public"])
+logger = logging.getLogger("kiowa.communications")
+
 webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 can_send = require_permission(Permission.COMMUNICATIONS_SEND)
@@ -397,9 +397,58 @@ def unsubscribe(token: str = Query(min_length=8, max_length=64), db: Session = D
     return Message(message="You've been unsubscribed from Kiowa Gun Club emails. Account and dues notices will still be sent.")
 
 
+def _record_text_consent(db: Session, phone: str | None, opted_in: bool, reason: str) -> int:
+    """Applies a STOP/START from a phone to everyone with that number on file, and
+    returns how many people have that number."""
+    digits = sms_service.ten_digits(phone)
+    if not digits:
+        return 0
+    on_file = func.right(func.regexp_replace(Person.phone, r"\D", "", "g"), 10)
+    people = db.scalars(select(Person).where(on_file == digits)).all()
+    for person in people:
+        if person.sms_opt_in == opted_in:
+            continue
+        membership.set_sms_consent(person, opted_in, source=f"sms:{reason}")
+        audit.record(db, actor=None, action="communication.sms_opted_in" if opted_in else "communication.sms_opted_out",
+                     entity_type="person", entity_id=person.id, summary=f"{person.full_name} replied {reason}")
+    return len(people)
+
+
+# The standard carrier opt-out/opt-in keywords. The club phone doesn't act on
+# them itself, so a reply is the only way consent changes by text.
+_STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}
+_START_WORDS = {"START", "UNSTOP", "OPTIN"}
+_HELP_WORDS = {"HELP", "INFO"}
+
+
+def _keyword_reply(db: Session, keyword: str, on_file: int) -> str:
+    """The confirmation texted back for a STOP/START/HELP, in the wording the
+    message program terms (www Terms page) promise."""
+    site = membership.site_settings(db)
+    name = site.site_title
+    if keyword in _STOP_WORDS:
+        return f"{name}: You're unsubscribed and won't get any more texts from us. Reply START to resume."
+    if keyword in _START_WORDS and on_file:
+        return (f"{name}: You're subscribed to texts about matches, events and dues reminders. Msg frequency varies. "
+                "Msg & data rates may apply. Reply HELP for help, STOP to opt out.")
+    if keyword in _START_WORDS:
+        return f"{name}: This number isn't on file with the club. Members can turn on texts in their member profile at {get_settings().portal_app_url}."
+    contact = " or ".join(c for c in (site.contact_email, site.contact_phone) if c)
+    return (f"{name}: Texts about matches, events and dues reminders. "
+            f"For help, contact {contact or 'us'} or visit {get_settings().public_site_url}. "
+            "Msg & data rates may apply. Reply STOP to opt out.")
+
+_HTTPSMS_DELIVERY_EVENTS = {"message.phone.sent", "message.phone.delivered", "message.send.failed", "message.send.expired"}
+# httpSMS reports when the club phone stops (or resumes) checking in; while it's
+# offline no text goes out, so this is logged as an error for monitoring.
+_HTTPSMS_PHONE_EVENTS = {"phone.heartbeat.offline", "phone.heartbeat.online"}
+
+
 @webhook_router.post("/sms/httpsms")
 async def httpsms_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    """Record httpSMS delivery events (CloudEvents JSON) idempotently."""
+    """Record httpSMS delivery events, STOP/START/HELP replies (each answered with
+    a confirmation text) and club phone online/offline alerts (CloudEvents JSON)
+    idempotently."""
     signing_key = get_settings().httpsms_webhook_signing_key
     if not signing_key:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="httpSMS webhook is not configured.")
@@ -409,17 +458,45 @@ async def httpsms_webhook(request: Request, db: Session = Depends(get_db)) -> di
     payload = await request.json()
     event_type = payload.get("type") or request.headers.get("X-Event-Type", "")
     data = payload.get("data") or {}
-    # Expired events carry the message as data.message_id; the others as data.id.
-    message_id = str(data.get("message_id") or data.get("id") or "") if event_type == "message.send.expired" else str(data.get("id") or "")
     event_id = str(payload.get("id") or "")
-    if not message_id or not event_id or event_type not in {
-        "message.phone.sent", "message.phone.delivered", "message.send.failed", "message.send.expired",
-    }:
+    if not event_id or event_type not in _HTTPSMS_DELIVERY_EVENTS | _HTTPSMS_PHONE_EVENTS | {"message.phone.received"}:
         return {"status": "ignored"}
 
     from app.models import SmsProviderEvent
     if db.get(SmsProviderEvent, f"httpsms:{event_id}"):
         return {"status": "duplicate"}
+
+    if event_type in _HTTPSMS_PHONE_EVENTS:
+        db.add(SmsProviderEvent(id=f"httpsms:{event_id}", event_type=event_type))
+        db.commit()
+        if event_type == "phone.heartbeat.offline":
+            logger.error("httpsms_phone_offline", extra={"last_heartbeat": data.get("last_heartbeat_timestamp")})
+        else:
+            logger.info("httpsms_phone_online")
+        return {"status": "recorded"}
+
+    if event_type == "message.phone.received":
+        keyword = "" if data.get("encrypted") else str(data.get("content") or "").strip().upper()
+        if keyword not in _STOP_WORDS | _START_WORDS | _HELP_WORDS:
+            return {"status": "ignored"}
+        db.add(SmsProviderEvent(id=f"httpsms:{event_id}", event_type=event_type))
+        on_file = 0
+        if keyword in _STOP_WORDS:
+            on_file = _record_text_consent(db, data.get("contact"), False, "STOP")
+        elif keyword in _START_WORDS:
+            on_file = _record_text_consent(db, data.get("contact"), True, "START")
+        reply = _keyword_reply(db, keyword, on_file)
+        # Consent is saved first: a failed confirmation never undoes a STOP.
+        db.commit()
+        result = sms_service.send_keyword_reply(data.get("contact"), reply)
+        if result is not None and not result.ok:
+            logger.warning("sms_keyword_reply_failed", extra={"keyword": keyword, "error": result.error})
+        return {"status": "recorded"}
+
+    # Expired events carry the message as data.message_id; the others as data.id.
+    message_id = str(data.get("message_id") or data.get("id") or "") if event_type == "message.send.expired" else str(data.get("id") or "")
+    if not message_id:
+        return {"status": "ignored"}
 
     db.add(SmsProviderEvent(id=f"httpsms:{event_id}", event_type=event_type))
     recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
@@ -452,137 +529,6 @@ async def httpsms_webhook(request: Request, db: Session = Depends(get_db)) -> di
 
     db.commit()
     return {"status": "recorded"}
-
-
-async def _verified_twilio_params(request: Request, path: str) -> dict[str, str]:
-    """Twilio signs the public URL it was given, so validate against API_PUBLIC_URL
-    rather than the URL as seen behind Render's proxy."""
-    from twilio.request_validator import RequestValidator
-    form = await request.form()
-    params = {str(k): str(v) for k, v in form.items()}
-    signature = request.headers.get("X-Twilio-Signature", "")
-    settings = get_settings()
-    if not settings.twilio_auth_token:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Twilio webhook is not configured.")
-    url = f"{settings.api_public_url.rstrip('/')}{path}"
-    if not signature or not RequestValidator(settings.twilio_auth_token).validate(url, params, signature):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
-    return params
-
-
-def _record_text_consent(db: Session, phone: str | None, opted_in: bool, reason: str) -> None:
-    """Applies a STOP/START from a phone to everyone with that number on file."""
-    digits = sms_service.ten_digits(phone)
-    if not digits:
-        return
-    on_file = func.right(func.regexp_replace(Person.phone, r"\D", "", "g"), 10)
-    for person in db.scalars(select(Person).where(on_file == digits, Person.sms_opt_in.is_(not opted_in))):
-        membership.set_sms_consent(person, opted_in, source=f"sms:{reason}")
-        audit.record(db, actor=None, action="communication.sms_opted_in" if opted_in else "communication.sms_opted_out",
-                     entity_type="person", entity_id=person.id, summary=f"{person.full_name} replied {reason}")
-
-
-# Twilio's default opt-out keywords (Messaging Service > Opt-Out Management).
-_STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}
-_START_WORDS = {"START", "UNSTOP", "YES", "OPTIN"}
-
-
-@webhook_router.post("/sms/twilio/inbound")
-async def twilio_inbound_webhook(request: Request, db: Session = Depends(get_db)) -> Response:
-    """Incoming texts. Twilio replies to STOP/START/HELP itself; this keeps each
-    person's text consent in step with what they replied."""
-    params = await _verified_twilio_params(request, "/api/webhooks/sms/twilio/inbound")
-    keyword = (params.get("OptOutType") or params.get("Body") or "").strip().upper()
-    if keyword in _STOP_WORDS:
-        _record_text_consent(db, params.get("From"), False, "STOP")
-    elif keyword in _START_WORDS:
-        _record_text_consent(db, params.get("From"), True, "START")
-    db.commit()
-    return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
-
-
-@webhook_router.post("/sms/twilio")
-async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    """Record Twilio SMS/MMS delivery status callbacks idempotently."""
-    params = await _verified_twilio_params(request, "/api/webhooks/sms/twilio")
-
-    message_id = params.get("MessageSid") or ""
-    message_status = (params.get("MessageStatus") or "").lower()
-    error_code = params.get("ErrorCode") or None
-    if not message_id or not message_status:
-        return {"status": "ignored"}
-
-    event_id = f"{message_id}:{message_status}:{error_code or ''}"
-    from app.models import SmsProviderEvent
-    if db.get(SmsProviderEvent, event_id):
-        return {"status": "duplicate"}
-
-    db.add(SmsProviderEvent(id=event_id, event_type=f"message.{message_status}"))
-    recipient = db.scalar(select(SmsRecipient).where(SmsRecipient.provider_message_id == message_id))
-    if recipient is None:
-        db.commit()
-        return {"status": "unknown message"}
-
-    when = now_utc()
-    if message_status in {"queued", "accepted"}:
-        recipient.status = "queued"
-    elif message_status in {"sending", "sent"}:
-        recipient.status = "sent"
-        recipient.sent_at = recipient.sent_at or when
-    elif message_status == "delivered":
-        recipient.status = "delivered"
-        recipient.delivered_at = recipient.delivered_at or when
-    elif message_status == "undelivered":
-        recipient.status = "undelivered"
-        recipient.failed_at = recipient.failed_at or when
-        recipient.error_code = error_code[:80] if error_code else None
-        recipient.error = params.get("ErrorMessage") or recipient.error
-    elif message_status == "failed":
-        recipient.status = "failed"
-        recipient.failed_at = recipient.failed_at or when
-        recipient.error_code = error_code[:80] if error_code else None
-        recipient.error = params.get("ErrorMessage") or recipient.error
-        if error_code == "21610":  # the number replied STOP earlier; Twilio blocks it
-            _record_text_consent(db, params.get("To"), False, "STOP")
-    else:
-        db.commit()
-        return {"status": "ignored"}
-
-    if recipient.status in {"failed", "undelivered"} and error_code in _TWILIO_SENDER_NOT_APPROVED:
-        _resend_with_backup(db, recipient)
-    db.commit()
-    return {"status": "recorded"}
-
-
-# Twilio accepted the text but carriers refused the club's number: 30032 = toll-free
-# number not verified (or verification rejected), 30034 = unregistered 10DLC number.
-_TWILIO_SENDER_NOT_APPROVED = {"30032", "30034"}
-
-
-def _resend_with_backup(db: Session, recipient: SmsRecipient) -> None:
-    person = db.get(Person, recipient.person_id) if recipient.person_id else None
-    # Resending through Twilio would fail the same way, and report back here again.
-    if person is None or get_settings().sms_fallback_provider == "twilio":
-        return
-    campaign = recipient.campaign
-    media_url = None
-    if campaign.media_asset_id and (asset := db.get(EmailAsset, campaign.media_asset_id)):
-        media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"
-    try:
-        result = sms_service.resend_with_backup(person, campaign.body, media_url)
-    except sms_service.ConsentError:
-        return
-    if result is None:
-        return
-    twilio_error = recipient.error
-    if result.ok:
-        recipient.provider_message_id = result.message_id
-        recipient.status, recipient.error, recipient.error_code = "sent", None, None
-        recipient.failed_at = None
-        recipient.sent_at = now_utc()
-    else:
-        recipient.error = f"Twilio: {twilio_error} / backup: {result.error}"
-    logger.warning("sms_resent_with_backup", extra={"recipient_id": recipient.id, "ok": result.ok})
 
 
 # ---------------------------------------------------------------------------

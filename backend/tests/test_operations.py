@@ -310,7 +310,7 @@ def test_httpsms_webhook_records_delivery(api, db, monkeypatch):
     db.refresh(expired)
     assert expired.status == "sent"
     assert post("evt-4", "message.send.expired", {"message_id": expired.provider_message_id, "is_final": True}).json() == {"status": "recorded"}
-    assert post("evt-5", "message.phone.received", {"id": "inbound"}).json() == {"status": "ignored"}
+    assert post("evt-5", "message.phone.missed_call", {"id": "inbound"}).json() == {"status": "ignored"}
 
     db.refresh(delivered)
     db.refresh(expired)
@@ -318,78 +318,47 @@ def test_httpsms_webhook_records_delivery(api, db, monkeypatch):
     assert expired.status == "failed" and expired.error_code == "expired"
 
 
-def test_fallback_provider_sends_what_the_main_one_refuses(db):
-    from app.services import sms as sms_service
-
-    class Refusing:
-        name = "twilio"
-        def send(self, person, body, media_url=None):  # noqa: ANN001, ANN202
-            return sms_service.SmsResult("failed", "Twilio request failed")
-
-    backup = sms_service.ConsoleSmsProvider()
-    provider = sms_service.FallbackSmsProvider(Refusing(), backup)
-    person = _person(db, "fallback@example.com", phone="(620) 555-0155", sms_opt_in=True, sms_opt_in_at=now_utc())
-    assert provider.send(person, "Range closed").ok
-    assert backup.outbox == [("+16205550155", "Range closed")]
-
-    # A number every provider would refuse isn't retried.
-    person.phone = "555"
-    assert not provider.send(person, "Range closed").ok
-    assert len(backup.outbox) == 1
-
-
-def test_twilio_unverified_number_failure_resends_with_backup(api, db, monkeypatch):
-    from twilio.request_validator import RequestValidator
-
+def test_httpsms_replies_update_consent_and_are_confirmed(api, db, monkeypatch, caplog):
     from app.core.config import get_settings
-    from app.models import SmsCampaign, SmsRecipient
-    from app.services import sms as sms_service
+    from app.models import SmsProviderEvent
 
-    monkeypatch.setattr(get_settings(), "twilio_auth_token", "twilio-test-token")
-    backup = sms_service.ConsoleSmsProvider()
-    monkeypatch.setattr(sms_service, "get_backup_sms_provider", lambda: backup)
-    person = _person(db, "tollfree@example.com", phone="(620) 555-0166", sms_opt_in=True, sms_opt_in_at=now_utc())
-    campaign = SmsCampaign(kind="manual", body="Match moved to Sunday")
-    recipient = SmsRecipient(person_id=person.id, phone=person.phone, provider_message_id="SMtollfree", status="sent")
-    campaign.recipients.append(recipient)
-    db.add(campaign)
-    db.commit()
-
-    url = f"{get_settings().api_public_url}/api/webhooks/sms/twilio"
-    params = {"MessageSid": "SMtollfree", "MessageStatus": "undelivered", "ErrorCode": "30032", "To": "+16205550166"}
-    signature = RequestValidator("twilio-test-token").compute_signature(url, params)
-    assert api.client.post("/api/webhooks/sms/twilio", data=params, headers={"X-Twilio-Signature": signature}).json() == {"status": "recorded"}
-
-    db.refresh(recipient)
-    assert backup.outbox == [("+16205550166", "Match moved to Sunday")]
-    assert recipient.status == "sent" and recipient.provider_message_id == "console-sms-1" and recipient.error_code is None
-
-
-def test_twilio_stop_and_start_replies_update_consent(api, db, monkeypatch):
-    from twilio.request_validator import RequestValidator
-
-    from app.core.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "twilio_auth_token", "twilio-test-token")
+    monkeypatch.setattr(get_settings(), "httpsms_webhook_signing_key", "httpsms-signing-key")
     person = _person(db, "replier@example.com", phone="(620) 555-0133", sms_opt_in=True, sms_opt_in_at=now_utc())
-    url = f"{get_settings().api_public_url}/api/webhooks/sms/twilio/inbound"
 
-    def post(params, token="twilio-test-token"):  # noqa: ANN001, ANN202
-        signature = RequestValidator(token).compute_signature(url, params)
-        return api.client.post("/api/webhooks/sms/twilio/inbound", data=params, headers={"X-Twilio-Signature": signature})
+    def post(event_id, event_type, data, token=None):  # noqa: ANN001, ANN202
+        return api.client.post("/api/webhooks/sms/httpsms", json={"id": event_id, "type": event_type, "specversion": "1.0", "data": data},
+                               headers={"Authorization": token or httpsms_token(), "X-Event-Type": event_type})
 
-    stop = {"From": "+16205550133", "Body": "Stop", "OptOutType": "STOP", "MessageSid": "SM1"}
-    assert post(stop, token="wrong-token").status_code == 401
-    assert post(stop).status_code == 200
+    stop = ("in-1", "message.phone.received", {"contact": "+16205550133", "content": " Stop ", "encrypted": False})
+    assert post(*stop, token=httpsms_token("wrong-key")).status_code == 401
+    assert post(*stop).json() == {"status": "recorded"}
+    assert post(*stop).json() == {"status": "duplicate"}
     db.refresh(person)
     assert not person.sms_opt_in and person.sms_opt_out_at is not None
+    assert len(sms_outbox()) == 1  # a duplicate event isn't confirmed twice
+    assert sms_outbox()[-1][0] == "+16205550133" and "You're unsubscribed" in sms_outbox()[-1][1]
 
-    assert post({"From": "+16205550133", "Body": "START", "MessageSid": "SM2"}).status_code == 200
+    assert post("in-2", "message.phone.received", {"contact": "+16205550133", "content": "START"}).json() == {"status": "recorded"}
     db.refresh(person)
     assert person.sms_opt_in and person.sms_opt_in_source == "sms:START"
-    assert post({"From": "+16205550133", "Body": "What time is the match?", "MessageSid": "SM3"}).status_code == 200
+    assert "You're subscribed" in sms_outbox()[-1][1]
+    assert post("in-5", "message.phone.received", {"contact": "+16205550199", "content": "start"}).json() == {"status": "recorded"}
+    assert sms_outbox()[-1][0] == "+16205550199" and "isn't on file" in sms_outbox()[-1][1]
+    assert post("in-6", "message.phone.received", {"contact": "+16205550133", "content": "Help"}).json() == {"status": "recorded"}
+    assert "For help, contact" in sms_outbox()[-1][1] and "Reply STOP" in sms_outbox()[-1][1]
+    replies = len(sms_outbox())
+    assert post("in-3", "message.phone.received", {"contact": "+16205550133", "content": "What time is the match?"}).json() == {"status": "ignored"}
+    assert post("in-7", "message.phone.received", {"contact": "+16205550133", "content": "yes"}).json() == {"status": "ignored"}
+    assert post("in-4", "message.phone.received", {"contact": "+16205550133", "content": "STOP", "encrypted": True}).json() == {"status": "ignored"}
     db.refresh(person)
     assert person.sms_opt_in
+    assert len(sms_outbox()) == replies
+
+    with caplog.at_level("INFO", logger="kiowa.communications"):
+        assert post("hb-1", "phone.heartbeat.offline", {"owner": "+16205550100"}).json() == {"status": "recorded"}
+        assert post("hb-2", "phone.heartbeat.online", {"owner": "+16205550100"}).json() == {"status": "recorded"}
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [("ERROR", "httpsms_phone_offline"), ("INFO", "httpsms_phone_online")]
+    assert db.get(SmsProviderEvent, "httpsms:hb-1").event_type == "phone.heartbeat.offline"
 
 
 # ---------------------------------------------------------------------------
