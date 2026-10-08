@@ -216,6 +216,9 @@ def send_renewal_reminders(db: Session, today: date | None = None) -> ReminderRe
         if not (person.sms_opt_in and person.sms_opt_in_at):
             result.skipped_no_consent += 1
             continue
+        # While texting is off, leave the text unclaimed so it can still go once it's on.
+        if not sms_service.texting_enabled():
+            continue
         marker = _claim_reminder(db, person, cycle, threshold, "sms")
         if marker is None:
             continue
@@ -230,7 +233,7 @@ def send_renewal_reminders(db: Session, today: date | None = None) -> ReminderRe
     # Mark the larger thresholds as done too, so a late-added member doesn't
     # get the 45-day text right after the 15-day one.
     for person in due:
-        channels = ("email", "sms") if person.sms_opt_in and person.sms_opt_in_at else ("email",)
+        channels = ("email", "sms") if person.sms_opt_in and person.sms_opt_in_at and sms_service.texting_enabled() else ("email",)
         for larger in (t for t in REMINDER_THRESHOLDS if t > threshold):
             for channel in channels:
                 marker = _claim_reminder(db, person, cycle, larger, channel)

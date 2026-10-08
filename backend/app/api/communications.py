@@ -19,7 +19,7 @@ from app.core.ratelimit import rate_limit
 from app.core.timeutil import now_utc
 from app.models import EmailAsset, EmailCampaign, EmailRecipient, Person, SmsCampaign, SmsRecipient
 from app.schemas.common import APIModel, Message
-from app.services import audit, uploads
+from app.services import audit, membership, uploads
 from app.services import email as email_service
 from app.services import sms as sms_service
 from app.services.html import sanitize_html
@@ -454,9 +454,9 @@ async def httpsms_webhook(request: Request, db: Session = Depends(get_db)) -> di
     return {"status": "recorded"}
 
 
-@webhook_router.post("/sms/twilio")
-async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
-    """Record Twilio SMS/MMS delivery status callbacks idempotently."""
+async def _verified_twilio_params(request: Request, path: str) -> dict[str, str]:
+    """Twilio signs the public URL it was given, so validate against API_PUBLIC_URL
+    rather than the URL as seen behind Render's proxy."""
     from twilio.request_validator import RequestValidator
     form = await request.form()
     params = {str(k): str(v) for k, v in form.items()}
@@ -464,9 +464,47 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dic
     settings = get_settings()
     if not settings.twilio_auth_token:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Twilio webhook is not configured.")
-    validator = RequestValidator(settings.twilio_auth_token)
-    if not signature or not validator.validate(str(request.url), params, signature):
+    url = f"{settings.api_public_url.rstrip('/')}{path}"
+    if not signature or not RequestValidator(settings.twilio_auth_token).validate(url, params, signature):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
+    return params
+
+
+def _record_text_consent(db: Session, phone: str | None, opted_in: bool, reason: str) -> None:
+    """Applies a STOP/START from a phone to everyone with that number on file."""
+    digits = sms_service.ten_digits(phone)
+    if not digits:
+        return
+    on_file = func.right(func.regexp_replace(Person.phone, r"\D", "", "g"), 10)
+    for person in db.scalars(select(Person).where(on_file == digits, Person.sms_opt_in.is_(not opted_in))):
+        membership.set_sms_consent(person, opted_in, source=f"sms:{reason}")
+        audit.record(db, actor=None, action="communication.sms_opted_in" if opted_in else "communication.sms_opted_out",
+                     entity_type="person", entity_id=person.id, summary=f"{person.full_name} replied {reason}")
+
+
+# Twilio's default opt-out keywords (Messaging Service > Opt-Out Management).
+_STOP_WORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "REVOKE"}
+_START_WORDS = {"START", "UNSTOP", "YES", "OPTIN"}
+
+
+@webhook_router.post("/sms/twilio/inbound")
+async def twilio_inbound_webhook(request: Request, db: Session = Depends(get_db)) -> Response:
+    """Incoming texts. Twilio replies to STOP/START/HELP itself; this keeps each
+    person's text consent in step with what they replied."""
+    params = await _verified_twilio_params(request, "/api/webhooks/sms/twilio/inbound")
+    keyword = (params.get("OptOutType") or params.get("Body") or "").strip().upper()
+    if keyword in _STOP_WORDS:
+        _record_text_consent(db, params.get("From"), False, "STOP")
+    elif keyword in _START_WORDS:
+        _record_text_consent(db, params.get("From"), True, "START")
+    db.commit()
+    return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
+
+
+@webhook_router.post("/sms/twilio")
+async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Record Twilio SMS/MMS delivery status callbacks idempotently."""
+    params = await _verified_twilio_params(request, "/api/webhooks/sms/twilio")
 
     message_id = params.get("MessageSid") or ""
     message_status = (params.get("MessageStatus") or "").lower()
@@ -504,12 +542,47 @@ async def twilio_webhook(request: Request, db: Session = Depends(get_db)) -> dic
         recipient.failed_at = recipient.failed_at or when
         recipient.error_code = error_code[:80] if error_code else None
         recipient.error = params.get("ErrorMessage") or recipient.error
+        if error_code == "21610":  # the number replied STOP earlier; Twilio blocks it
+            _record_text_consent(db, params.get("To"), False, "STOP")
     else:
         db.commit()
         return {"status": "ignored"}
 
+    if recipient.status in {"failed", "undelivered"} and error_code in _TWILIO_SENDER_NOT_APPROVED:
+        _resend_with_backup(db, recipient)
     db.commit()
     return {"status": "recorded"}
+
+
+# Twilio accepted the text but carriers refused the club's number: 30032 = toll-free
+# number not verified (or verification rejected), 30034 = unregistered 10DLC number.
+_TWILIO_SENDER_NOT_APPROVED = {"30032", "30034"}
+
+
+def _resend_with_backup(db: Session, recipient: SmsRecipient) -> None:
+    person = db.get(Person, recipient.person_id) if recipient.person_id else None
+    # Resending through Twilio would fail the same way, and report back here again.
+    if person is None or get_settings().sms_fallback_provider == "twilio":
+        return
+    campaign = recipient.campaign
+    media_url = None
+    if campaign.media_asset_id and (asset := db.get(EmailAsset, campaign.media_asset_id)):
+        media_url = f"{get_settings().api_public_url.rstrip('/')}/api/public/media/{asset.public_token}"
+    try:
+        result = sms_service.resend_with_backup(person, campaign.body, media_url)
+    except sms_service.ConsentError:
+        return
+    if result is None:
+        return
+    twilio_error = recipient.error
+    if result.ok:
+        recipient.provider_message_id = result.message_id
+        recipient.status, recipient.error, recipient.error_code = "sent", None, None
+        recipient.failed_at = None
+        recipient.sent_at = now_utc()
+    else:
+        recipient.error = f"Twilio: {twilio_error} / backup: {result.error}"
+    logger.warning("sms_resent_with_backup", extra={"recipient_id": recipient.id, "ok": result.ok})
 
 
 # ---------------------------------------------------------------------------

@@ -318,6 +318,80 @@ def test_httpsms_webhook_records_delivery(api, db, monkeypatch):
     assert expired.status == "failed" and expired.error_code == "expired"
 
 
+def test_fallback_provider_sends_what_the_main_one_refuses(db):
+    from app.services import sms as sms_service
+
+    class Refusing:
+        name = "twilio"
+        def send(self, person, body, media_url=None):  # noqa: ANN001, ANN202
+            return sms_service.SmsResult("failed", "Twilio request failed")
+
+    backup = sms_service.ConsoleSmsProvider()
+    provider = sms_service.FallbackSmsProvider(Refusing(), backup)
+    person = _person(db, "fallback@example.com", phone="(620) 555-0155", sms_opt_in=True, sms_opt_in_at=now_utc())
+    assert provider.send(person, "Range closed").ok
+    assert backup.outbox == [("+16205550155", "Range closed")]
+
+    # A number every provider would refuse isn't retried.
+    person.phone = "555"
+    assert not provider.send(person, "Range closed").ok
+    assert len(backup.outbox) == 1
+
+
+def test_twilio_unverified_number_failure_resends_with_backup(api, db, monkeypatch):
+    from twilio.request_validator import RequestValidator
+
+    from app.core.config import get_settings
+    from app.models import SmsCampaign, SmsRecipient
+    from app.services import sms as sms_service
+
+    monkeypatch.setattr(get_settings(), "twilio_auth_token", "twilio-test-token")
+    backup = sms_service.ConsoleSmsProvider()
+    monkeypatch.setattr(sms_service, "get_backup_sms_provider", lambda: backup)
+    person = _person(db, "tollfree@example.com", phone="(620) 555-0166", sms_opt_in=True, sms_opt_in_at=now_utc())
+    campaign = SmsCampaign(kind="manual", body="Match moved to Sunday")
+    recipient = SmsRecipient(person_id=person.id, phone=person.phone, provider_message_id="SMtollfree", status="sent")
+    campaign.recipients.append(recipient)
+    db.add(campaign)
+    db.commit()
+
+    url = f"{get_settings().api_public_url}/api/webhooks/sms/twilio"
+    params = {"MessageSid": "SMtollfree", "MessageStatus": "undelivered", "ErrorCode": "30032", "To": "+16205550166"}
+    signature = RequestValidator("twilio-test-token").compute_signature(url, params)
+    assert api.client.post("/api/webhooks/sms/twilio", data=params, headers={"X-Twilio-Signature": signature}).json() == {"status": "recorded"}
+
+    db.refresh(recipient)
+    assert backup.outbox == [("+16205550166", "Match moved to Sunday")]
+    assert recipient.status == "sent" and recipient.provider_message_id == "console-sms-1" and recipient.error_code is None
+
+
+def test_twilio_stop_and_start_replies_update_consent(api, db, monkeypatch):
+    from twilio.request_validator import RequestValidator
+
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "twilio_auth_token", "twilio-test-token")
+    person = _person(db, "replier@example.com", phone="(620) 555-0133", sms_opt_in=True, sms_opt_in_at=now_utc())
+    url = f"{get_settings().api_public_url}/api/webhooks/sms/twilio/inbound"
+
+    def post(params, token="twilio-test-token"):  # noqa: ANN001, ANN202
+        signature = RequestValidator(token).compute_signature(url, params)
+        return api.client.post("/api/webhooks/sms/twilio/inbound", data=params, headers={"X-Twilio-Signature": signature})
+
+    stop = {"From": "+16205550133", "Body": "Stop", "OptOutType": "STOP", "MessageSid": "SM1"}
+    assert post(stop, token="wrong-token").status_code == 401
+    assert post(stop).status_code == 200
+    db.refresh(person)
+    assert not person.sms_opt_in and person.sms_opt_out_at is not None
+
+    assert post({"From": "+16205550133", "Body": "START", "MessageSid": "SM2"}).status_code == 200
+    db.refresh(person)
+    assert person.sms_opt_in and person.sms_opt_in_source == "sms:START"
+    assert post({"From": "+16205550133", "Body": "What time is the match?", "MessageSid": "SM3"}).status_code == 200
+    db.refresh(person)
+    assert person.sms_opt_in
+
+
 # ---------------------------------------------------------------------------
 # Renewal cycle & scheduled jobs
 # ---------------------------------------------------------------------------
