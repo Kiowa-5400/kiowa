@@ -9,6 +9,9 @@ Fill in the WIPE lists below with the exact records to remove, then:
 Run it on the Render "kiowa" shell: it has DATABASE_URL and the disk holding
 the stored files. People with a board login are skipped unless --include-board.
 
+RESET_PAYMENTS_FOR clears every payment of a test membership and recomputes its
+renewal date, keeping the person.
+
 A payment deleted on its own (PAYMENT_IDS, STRIPE_TEST_PAYMENTS) puts its
 application back to unpaid, but does not undo the membership it granted; the
 dry run flags those so the member's status and renewal date can be fixed.
@@ -56,7 +59,6 @@ PEOPLE_NAMES: list[str] = [  # "First Last", case-insensitive; every match is re
     "Homer Simpson",
 ]
 PEOPLE_EMAILS: list[str] = [
-    "gavingriffith212@gmail.com",
     "mooredevelopment@sbcglobal.net",
     "gavingriffith1@outlook.com",
     "ggriffith288@gmail.com",
@@ -65,6 +67,13 @@ PEOPLE_EMAILS: list[str] = [
 PERSON_IDS: list[int] = []
 APPLICATION_IDS: list[int] = []
 PAYMENT_IDS: list[int] = []  # fake cash/check entries; find them with --list-payments
+# Test memberships to keep: every payment of these people is deleted and their
+# renewal date set back to what their remaining real payments cover (none -> blank),
+# so the account can go through renewal again. The person, logins and documents stay.
+RESET_PAYMENTS_FOR: list[str] = [
+    "gavingriffith212@gmail.com",
+    "ggriffith288@gmail.com"
+]
 # Payments made with Stripe test keys (cs_test_ sessions). The live webhook
 # never touches them, and pending ones would fail the daily reconciliation.
 STRIPE_TEST_PAYMENTS = True
@@ -139,11 +148,11 @@ class Wiper:
         return (f"payment #{payment.id} ${payment.amount} {payment.method} {payment.status} "
                 f"{payment.person.first_name} {payment.person.last_name} {payment.stripe_checkout_session_id or ''}").rstrip()
 
-    def payment(self, payment: Payment) -> None:
+    def payment(self, payment: Payment, *, warn: bool = True) -> None:
         """A payment removed on its own; its person stays, so undo what it did to their application."""
         self.remove(payment, self.payment_label(payment))
         self.db.flush()
-        if payment.covers_through is not None:
+        if warn and payment.covers_through is not None:
             print(f"    ! it made {payment.person.first_name} {payment.person.last_name} a member through "
                   f"{payment.covers_through}; correct their status and renewal date on the board site if that was fake")
         application = payment.application
@@ -154,6 +163,22 @@ class Wiper:
                 if application.payment_status == "paid":
                     print(f"    ! application #{application.id} was completed by it; review that application")
                 application.payment_status = "unpaid"
+
+    def reset_payments(self, emails: list[str]) -> None:
+        wanted = {email.strip().lower() for email in emails}
+        people = list(self.db.scalars(select(Person).where(func.lower(Person.email).in_(wanted))))
+        for missing in sorted(wanted - {p.email.lower() for p in people}):
+            print(f"  ! Person not found: {missing!r}")
+        for person in people:
+            print(f"Reset payments for #{person.id} {person.first_name} {person.last_name} <{person.email}>")
+            for payment in list(self.db.scalars(select(Payment).where(Payment.person_id == person.id).order_by(Payment.id))):
+                self.payment(payment, warn=False)
+            # Recompute from what's left; reminders and renewal eligibility key off renewal_date.
+            remaining = self.db.scalar(select(func.max(Payment.covers_through)).where(
+                Payment.person_id == person.id, Payment.status.in_(("paid", "partially_refunded"))))
+            print(f"  - renewal date {person.renewal_date or 'blank'} -> {remaining or 'blank'} "
+                  f"(status stays {person.membership_status!r}; change it on the board site if needed)")
+            person.renewal_date = remaining
 
     def stripe_test_payments(self) -> None:
         rows = list(self.db.scalars(select(Payment).where(
@@ -174,6 +199,8 @@ class Wiper:
 
     def run(self) -> None:
         self.people(PEOPLE_NAMES, PEOPLE_EMAILS, PERSON_IDS)
+        self.db.flush()
+        self.reset_payments(RESET_PAYMENTS_FOR)
         self.db.flush()
         if STRIPE_TEST_PAYMENTS:
             self.stripe_test_payments()
