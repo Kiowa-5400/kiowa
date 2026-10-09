@@ -52,17 +52,10 @@ from app.services.storage import delete_quietly
 # WIPE: what to delete. Leave a list empty to skip it.
 # ---------------------------------------------------------------------------
 
-PEOPLE_NAMES: list[str] = [  # "First Last", case-insensitive; every match is removed
-    "Sponge Bob",
-    "Scooby Doo",
-    "Foo Foo",
-    "Homer Simpson",
+PEOPLE_NAMES: list[str] = [  # "First Last", case-insensitive; every match is removed,
 ]
 PEOPLE_EMAILS: list[str] = [
-    "mooredevelopment@sbcglobal.net",
-    "gavingriffith1@outlook.com",
-    "ggriffith288@gmail.com",
-    "gavin.griffith2026@outlook.com",
+    "shedongpeacock@outlook.com",
 ]
 PERSON_IDS: list[int] = []
 APPLICATION_IDS: list[int] = []
@@ -70,10 +63,7 @@ PAYMENT_IDS: list[int] = []  # fake cash/check entries; find them with --list-pa
 # Test memberships to keep: every payment of these people is deleted and their
 # renewal date set back to what their remaining real payments cover (none -> blank),
 # so the account can go through renewal again. The person, logins and documents stay.
-RESET_PAYMENTS_FOR: list[str] = [
-    "gavingriffith212@gmail.com",
-    "ggriffith288@gmail.com"
-]
+RESET_PAYMENTS_FOR: list[str] = []
 # Payments made with Stripe test keys (cs_test_ sessions). The live webhook
 # never touches them, and pending ones would fail the daily reconciliation.
 STRIPE_TEST_PAYMENTS = True
