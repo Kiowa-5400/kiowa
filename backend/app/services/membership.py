@@ -249,8 +249,9 @@ def submit_application(
         if not (getattr(person, key) or "").strip():
             errors[key] = f"{label} is required."
     if person.nra_expiration_date is None:
-        errors["nra_expiration_date"] = "Your NRA membership expiration date is required."
-    elif person.nra_expiration_date < club_today():
+        if not person.nra_life_member:
+            errors["nra_expiration_date"] = "Your NRA membership expiration date is required."
+    elif person.nra_expiration_date < club_today() and not person.nra_life_member:
         errors["nra_expiration_date"] = "Your NRA membership has expired. Renew it with the NRA before applying."
     if application.application_type == "renewal" and not person.nra_number:
         errors["nra_number"] = "Your NRA member number is required for renewal."
@@ -363,7 +364,7 @@ def evaluate_payment_eligibility(db: Session, application: Application, today: d
         reasons.append("Your NRA membership proof has not been verified by the board.")
     if not person.nra_active:
         reasons.append("Your NRA membership is not marked active. Upload current NRA proof for board review.")
-    if person.nra_expiration_date and person.nra_expiration_date < today:
+    if person.nra_expiration_date and person.nra_expiration_date < today and not person.nra_life_member:
         reasons.append("Your NRA membership has expired.")
     if application.application_type == "waiting_list" and not person.background_check_cleared:
         reasons.append("Your background check has not been cleared by the board.")

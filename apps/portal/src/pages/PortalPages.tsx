@@ -142,7 +142,7 @@ export function ProfilePage() {
       <form className="card stack" onSubmit={(e) => { e.preventDefault(); void save.run(); }} noValidate>
         <FormErrors error={save.error} fieldErrors={save.fieldErrors} />
         {saved && <Alert kind="success">Your information was saved.</Alert>}
-        <ProfileFields form={form} onChange={setForm} errors={save.fieldErrors} />
+        <ProfileFields form={form} onChange={setForm} errors={save.fieldErrors} nraLifeMember={profile.nra_life_member} />
         <div className="row"><button className="btn btn-primary" type="submit" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save my information'}</button></div>
       </form>
 

@@ -322,6 +322,7 @@ def run_nra_expiration_check(db: Session, today: date | None = None) -> int:
         select(Person).where(
             Person.membership_status == "member",
             Person.nra_active.is_(True),
+            Person.nra_life_member.is_(False),
             Person.nra_expiration_date.is_not(None),
             Person.nra_expiration_date < today,
         )

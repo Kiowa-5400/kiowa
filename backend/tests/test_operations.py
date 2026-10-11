@@ -88,6 +88,38 @@ def test_csv_import(api, db):
     assert result == {"created": 1, "skipped": 1, "errors": ["Line 4: missing name or email"]}
 
 
+ROSTER_CSV = (
+    "KIOWA GUN CLUB ROSTER,,,,,,,,,,,,,,,,\r\n"
+    ",,,,,,,,,,,,,,,,\r\n"
+    "Last Name,FirstName,Mailing Address,City,State,Zip Code,Phone Number,Member No.,Current Dues Paid,Dues Due,NRA No.,NRA Exp.,Rules Y/N,Card Y/N,E-Mail,,\r\n"
+    "Doe,Jane,12 Main St.,Great Bend ,ks,67530,620-555-0100,1,9/10/2026,27-Aug,123456789,Aug-27,Y,Y,Jane@Example.com,new address,\r\n"
+    "Roe,Rick,PO Box 9,Otis,KS,67565,620-555-0101,2,8/2/2026,27-Aug,987654321,Life,Y,N,rick@example.com,,\r\n"
+    "Poe,Pat,1 Elm,Larned,KS,67550,620-555-0102,3,8/2/2026,27-Aug,123456789,26-Nov,Y,Y,pat@example.com, ,\r\n"
+    "Bad,Email,1 Oak,Larned,KS,67550,620-555-0103,4,8/2/2026,27-Aug,55555555,Life,Y,Y,bad mail@example.com,,\r\n"
+    ",,,,,,,,,,,,,,,`,\r\n"
+    ",,,,,,,,,,,,,,,,\r\n"
+)
+
+
+def test_csv_import_club_roster(api, db):
+    board(api, db)
+    result = api.post("/api/board/people/import", json={"csv": ROSTER_CSV}).json()
+    assert result["created"] == 3 and result["skipped"] == 0
+    assert result["errors"] == [
+        "Line 6 (Pat Poe): NRA number 123456789 is already on file for someone else; left blank",
+        'Line 7 (Email Bad): "bad mail@example.com" is not a valid email address, so this person was not added',
+    ]
+    jane = db.scalar(select(Person).where(Person.email == "jane@example.com"))
+    assert (jane.first_name, jane.last_name, jane.city, jane.state, jane.zip_code) == ("Jane", "Doe", "Great Bend", "KS", "67530")
+    assert (jane.phone, jane.member_number, jane.nra_number, jane.notes) == ("(620) 555-0100", 1, "123456789", "new address")
+    # Dues due August 2027 means paid through the September 2026 cutoff.
+    assert jane.renewal_date == date(2026, 9, 10) and jane.nra_expiration_date == date(2027, 8, 31)
+    rick = db.scalar(select(Person).where(Person.email == "rick@example.com"))
+    assert rick.nra_life_member and rick.nra_expiration_date is None and rick.notes == "Card: N"
+    pat = db.scalar(select(Person).where(Person.email == "pat@example.com"))
+    assert pat.nra_number is None and pat.nra_expiration_date == date(2026, 11, 30) and pat.notes is None
+
+
 # ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------

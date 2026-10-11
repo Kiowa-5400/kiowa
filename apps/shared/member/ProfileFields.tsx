@@ -37,11 +37,13 @@ export function profilePayload(form: ProfileForm): Record<string, string | boole
   return Object.fromEntries(Object.entries(form).map(([k, v]) => [k, typeof v === 'string' && v.trim() === '' ? null : v]));
 }
 
-export function ProfileFields({ form, onChange, errors, nraRequired }: {
+export function ProfileFields({ form, onChange, errors, nraRequired, nraLifeMember }: {
   form: ProfileForm;
   onChange: (form: ProfileForm) => void;
   errors: Record<string, string>;
   nraRequired?: boolean;
+  /** NRA life members have no expiration date to enter. */
+  nraLifeMember?: boolean;
 }) {
   const set = (key: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...form, [key]: e.target.value });
   return (
@@ -82,8 +84,9 @@ export function ProfileFields({ form, onChange, errors, nraRequired }: {
           <TextField label={nraRequired ? 'NRA member number' : 'NRA member number (if you have it)'} inputMode="numeric" required={nraRequired}
             value={form.nra_number} onChange={(e) => onChange({ ...form, nra_number: e.target.value.replace(/\D/g, '') })}
             maxLength={12} error={errors.nra_number} hint="5 to 12 digits, from your card." />
-          <TextField label="NRA membership expiration date" type="date" required value={form.nra_expiration_date}
-            onChange={set('nra_expiration_date')} error={errors.nra_expiration_date} />
+          <TextField label="NRA membership expiration date" type="date" required={!nraLifeMember} value={form.nra_expiration_date}
+            onChange={set('nra_expiration_date')} error={errors.nra_expiration_date}
+            hint={nraLifeMember ? 'You are on file as an NRA life member, so this can stay blank.' : undefined} />
         </div>
       </fieldset>
     </div>

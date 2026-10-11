@@ -34,6 +34,7 @@ class MemberProfile(BaseModel):
     member_since: date | None
     nra_number: str | None
     nra_expiration_date: date | None
+    nra_life_member: bool
     nra_active: bool
     background_check_cleared: bool
     sms_opt_in: bool
@@ -55,6 +56,7 @@ class PersonSummary(BaseModel):
     groups: list[str]
     renewal_date: date | None
     nra_expiration_date: date | None
+    nra_life_member: bool
     nra_active: bool
     sms_opt_in: bool
     email_opt_out: bool
@@ -71,6 +73,7 @@ class PersonDetail(PersonSummary):
     on_board: bool
     on_shooting_committee: bool
     member_since: date | None
+    member_number: int | None
     terminated_at: datetime | None
     nra_number: str | None
     background_check_cleared: bool
@@ -102,6 +105,8 @@ class PersonCreate(APIModel):
     renewal_date: date | None = None
     nra_number: NraNumber = None
     nra_expiration_date: date | None = None
+    nra_life_member: bool = False
+    member_number: int | None = None
     sms_opt_in: bool = False
     notes: str | None = None
 
@@ -113,6 +118,8 @@ class PersonUpdate(ProfileUpdate):
     on_shooting_committee: bool | None = None
     renewal_date: date | None = None
     nra_active: bool | None = None
+    nra_life_member: bool | None = None
+    member_number: int | None = None
     background_check_cleared: bool | None = None
     email_opt_out: bool | None = None
     notes: str | None = None

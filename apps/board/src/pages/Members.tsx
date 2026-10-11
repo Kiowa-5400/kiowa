@@ -8,13 +8,13 @@ import { PageHeader, Pager, StatusBadge, useDebounced, type GroupCount } from '.
 
 type Person = {
   id: number; first_name: string; last_name: string; email: string; phone: string | null; city: string | null;
-  membership_status: string; groups: string[]; renewal_date: string | null; nra_expiration_date: string | null; nra_active: boolean;
+  membership_status: string; groups: string[]; renewal_date: string | null; nra_expiration_date: string | null; nra_life_member: boolean; nra_active: boolean;
   sms_opt_in: boolean; email_opt_out: boolean; pending_documents: number; open_application_status: string | null; has_login: boolean;
 };
 
 type PersonDetail = Person & {
   address_line1: string | null; address_line2: string | null; state: string | null; zip_code: string | null;
-  on_board: boolean; on_shooting_committee: boolean; member_since: string | null; terminated_at: string | null;
+  on_board: boolean; on_shooting_committee: boolean; member_since: string | null; member_number: number | null; terminated_at: string | null;
   nra_number: string | null; background_check_cleared: boolean; sms_opt_in_at: string | null; sms_opt_in_source: string | null;
   sms_opt_out_at: string | null; email_verified: boolean; notes: string | null; board_role: string | null;
 };
@@ -100,7 +100,7 @@ export function MembersPage() {
                           <dt>Groups</dt><dd>{p.groups.map((g) => GROUP_LABELS[g]).join(', ') || '—'}</dd>
                           <dt>Texts OK</dt><dd>{p.sms_opt_in ? 'Yes' : 'No'}</dd>
                           <dt>Club emails</dt><dd>{p.email_opt_out ? 'Unsubscribed' : 'Yes'}</dd>
-                          <dt>NRA</dt><dd>{p.nra_active ? `Active${p.nra_expiration_date ? `, expires ${formatDate(p.nra_expiration_date, 'medium')}` : ''}` : 'Expired'}</dd>
+                          <dt>NRA</dt><dd>{p.nra_active ? `Active${p.nra_life_member ? ', life member' : p.nra_expiration_date ? `, expires ${formatDate(p.nra_expiration_date, 'medium')}` : ''}` : 'Expired'}</dd>
                           <dt>Application</dt><dd>{p.open_application_status ? titleCase(p.open_application_status) : 'None open'}</dd>
                           <dt>Online account</dt><dd>{p.has_login ? 'Yes' : 'Not set up'}</dd>
                         </dl>
@@ -168,7 +168,7 @@ function ImportPeople({ onDone }: { onDone: () => void }) {
   return (
     <div className="stack">
       <ol>
-        <li><a href={template} download="kiowa-contacts-template.csv">Download the example spreadsheet</a> and fill in one person per row.</li>
+        <li>Use the club roster as it is, or <a href={template} download="kiowa-contacts-template.csv">download the example spreadsheet</a> and fill in one person per row.</li>
         <li>In Excel or Google Sheets, save it as a <strong>CSV</strong> file.</li>
         <li>Choose that file below. People already on the list (same email) are skipped, never changed.</li>
       </ol>
@@ -273,6 +273,7 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
     address_line1: person.address_line1 ?? '', address_line2: person.address_line2 ?? '', city: person.city ?? '', state: person.state ?? '',
     zip_code: person.zip_code ?? '', membership_status: person.membership_status, renewal_date: person.renewal_date ?? '',
     nra_number: person.nra_number ?? '', nra_expiration_date: person.nra_expiration_date ?? '', nra_active: person.nra_active,
+    nra_life_member: person.nra_life_member, member_number: person.member_number?.toString() ?? '',
     background_check_cleared: person.background_check_cleared, on_board: person.on_board, on_shooting_committee: person.on_shooting_committee,
     sms_opt_in: person.sms_opt_in, email_opt_out: person.email_opt_out, notes: person.notes ?? '',
   });
@@ -313,6 +314,7 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
           {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </SelectField>
         <TextField label="Dues paid through" type="date" {...text('renewal_date')} hint="Set automatically when dues are paid." />
+        <TextField label="Member number" inputMode="numeric" {...text('member_number')} error={save.fieldErrors.member_number} />
       </div>
       <div className="check-grid">
         <Checkbox label="On the board" {...flag('on_board')} />
@@ -327,6 +329,7 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
       </div>
       <div className="check-grid">
         <Checkbox label="NRA membership is current" hint="Turned off automatically when the expiration date passes." {...flag('nra_active')} />
+        <Checkbox label="NRA life member" hint="No expiration date needed." {...flag('nra_life_member')} />
         <Checkbox label="Background check cleared" hint="For new members coming off the waiting list." {...flag('background_check_cleared')} />
       </div>
 

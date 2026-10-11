@@ -101,12 +101,16 @@ class Person(TimestampMixin, Base):
     on_board: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     on_shooting_committee: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     member_since: Mapped[date | None] = mapped_column(Date)
+    # The number on the club roster and membership card. Not unique: the roster is the authority.
+    member_number: Mapped[int | None] = mapped_column(Integer, index=True)
     # The shared annual dues cutoff this person has paid through (see services/renewal.py).
     renewal_date: Mapped[date | None] = mapped_column(Date, index=True)
     terminated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     nra_number: Mapped[str | None] = mapped_column(String(20), unique=True)
     nra_expiration_date: Mapped[date | None] = mapped_column(Date)
+    # NRA life members have no expiration date and never lapse.
+    nra_life_member: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # Flipped off by the nightly NRA check once the expiration passes; only a
     # board review of new proof turns it back on.
     nra_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))

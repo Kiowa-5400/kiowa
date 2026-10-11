@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -27,9 +28,10 @@ from app.core.permissions import Permission
 from app.core.timeutil import club_today, now_utc
 from app.models import Application, Document, EmailRecipient, Payment, Person, SmsRecipient
 from app.schemas.common import Page
+from app.schemas.common import _phone as normalize_phone
 from app.schemas.membership import BoardApplicationSummary, DocumentOut, PaymentSummary
 from app.schemas.people import CsvImport, PersonCreate, PersonDetail, PersonSummary, PersonUpdate
-from app.services import audit, membership
+from app.services import audit, membership, roster_import
 from app.services.auth import find_person_by_email
 from app.services.people import GROUPS, group_condition, search_conditions
 
@@ -170,7 +172,7 @@ def update_person(person_id: int, payload: PersonUpdate, request: Request, auth:
             person.member_since = person.member_since or club_today()
         elif person.membership_status == "terminated":
             person.terminated_at = now_utc()
-    for flag in ("on_board", "on_shooting_committee", "nra_active", "renewal_date", "notes"):
+    for flag in ("on_board", "on_shooting_committee", "nra_active", "nra_life_member", "member_number", "renewal_date", "notes"):
         if flag in data and data[flag] != getattr(person, flag):
             changes[flag] = [str(getattr(person, flag)), str(data[flag])]
             setattr(person, flag, data[flag])
@@ -197,31 +199,67 @@ def update_person(person_id: int, payload: PersonUpdate, request: Request, auth:
 
 @router.post("/people/import")
 def import_people(payload: CsvImport, request: Request, auth: BoardAuth = Depends(can_edit), db: Session = Depends(get_db)) -> dict[str, object]:
-    """Spreadsheet import (ported from kiowa-gun). Header must include first_name,
-    last_name (or name) and email; phone and address columns are optional.
+    """Spreadsheet import (ported from kiowa-gun). Takes the app's template or
+    the club roster saved as CSV; see services/roster_import.py for the columns.
     Existing emails are skipped, never overwritten."""
-    reader = csv.DictReader(io.StringIO(payload.csv.strip()))
-    headers = {h.strip().lower(): h for h in (reader.fieldnames or [])}
-    if "email" not in headers or not ({"first_name", "last_name"} <= headers.keys() or "name" in headers):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='The header row needs "email" plus "first_name" and "last_name" (or "name").')
+    try:
+        rows = list(roster_import.read_rows(payload.csv))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    settings_row = membership.site_settings(db)
     created, skipped, errors = 0, 0, []
-    for line_number, raw in enumerate(reader, start=2):
-        row = {k.strip().lower(): (v or "").strip() for k, v in raw.items() if k}
-        email = row.get("email", "").lower()
-        if "name" in row and not row.get("first_name"):
-            parts = row["name"].split()
-            row["first_name"], row["last_name"] = (parts[0] if parts else ""), " ".join(parts[1:])
-        if not email or "@" not in email or not row.get("first_name"):
-            errors.append(f"Line {line_number}: missing name or email")
+    for row in rows:
+        first_name, last_name = row.get("first_name"), row.get("last_name")
+        if row.get("name") and not first_name:
+            parts = row.get("name").split()
+            first_name, last_name = (parts[0] if parts else ""), " ".join(parts[1:])
+        email = row.get("email").lower()
+        if not email or not first_name:
+            errors.append(f"Line {row.line}: missing name or email")
+            continue
+        who = f"Line {row.line} ({first_name} {last_name})".replace(" )", ")")
+        if not roster_import.is_email(email):
+            errors.append(f'{who}: "{email}" is not a valid email address, so this person was not added')
             continue
         if find_person_by_email(db, email):
             skipped += 1
             continue
+
+        # A cell that can't be read is left blank and reported; the person is still added.
+        notes = list(row.remarks) + ([row.get("notes")] if row.get("notes") else [])
+        phone = row.get("phone")[:40] or None
+        try:
+            phone = normalize_phone(phone)
+        except ValueError:
+            pass
+        nra_number: str | None = re.sub(r"[\s-]", "", row.get("nra_number")) or None
+        if nra_number and not re.fullmatch(r"\d{5,12}", nra_number):
+            errors.append(f'{who}: NRA number "{nra_number}" is not 5 to 12 digits; left blank')
+            nra_number = None
+        elif nra_number and db.scalar(select(Person.id).where(Person.nra_number == nra_number)):
+            errors.append(f"{who}: NRA number {nra_number} is already on file for someone else; left blank")
+            nra_number = None
+        nra_expiration_date, nra_life_member, renewal_date = None, False, None
+        try:
+            nra_expiration_date, nra_life_member = roster_import.nra_expiration(row.get("nra_expiration"))
+        except ValueError as exc:
+            errors.append(f"{who}: {exc}; left blank")
+        try:
+            renewal_date = roster_import.paid_through(settings_row, row)
+        except ValueError as exc:
+            errors.append(f"{who}: {exc}; left blank")
+        member_number = int(row.get("member_number")) if row.get("member_number").isdigit() else None
+        for column, label in (("rules", "Rules"), ("card", "Card")):
+            if row.get(column) and row.get(column).upper() not in ("Y", "YES"):
+                notes.append(f"{label}: {row.get(column)}")
+
         db.add(Person(
-            first_name=row["first_name"][:120], last_name=(row.get("last_name") or "")[:120], email=email,
-            phone=row.get("phone") or None, address_line1=row.get("address") or row.get("address_line1") or None,
-            city=row.get("city") or None, state=(row.get("state") or "").upper() or None, zip_code=row.get("zip") or row.get("zip_code") or None,
-            membership_status=payload.membership_status,
+            first_name=first_name[:120], last_name=last_name[:120], email=email, phone=phone,
+            address_line1=row.get("address_line1")[:255] or None, address_line2=row.get("address_line2")[:255] or None,
+            city=row.get("city")[:120] or None, state=row.get("state").upper()[:40] or None, zip_code=row.get("zip_code")[:20] or None,
+            membership_status=payload.membership_status, member_number=member_number, renewal_date=renewal_date,
+            nra_number=nra_number, nra_expiration_date=nra_expiration_date, nra_life_member=nra_life_member,
+            notes="\n".join(notes) or None,
         ))
         db.flush()
         created += 1

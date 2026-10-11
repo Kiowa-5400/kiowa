@@ -13,6 +13,7 @@ export type Profile = {
   member_since: string | null;
   nra_number: string | null;
   nra_expiration_date: string | null;
+  nra_life_member: boolean;
   nra_active: boolean;
   background_check_cleared: boolean;
   sms_opt_in: boolean;

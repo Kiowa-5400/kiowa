@@ -139,7 +139,7 @@ function InfoStep({ application, profile, onSaved, onBack }: { application: Appl
       <h2>Your information</h2>
       <p className="muted">Check that everything is current. This updates your record with the club. Signed in as {profile.email}.</p>
       <FormErrors error={save.error} fieldErrors={save.fieldErrors} />
-      <ProfileFields form={form} onChange={setForm} errors={save.fieldErrors} nraRequired={application.application_type === 'renewal'} />
+      <ProfileFields form={form} onChange={setForm} errors={save.fieldErrors} nraRequired={application.application_type === 'renewal'} nraLifeMember={profile.nra_life_member} />
       <div className="wizard-nav">
         <button type="button" className="btn" onClick={onBack}>Back</button>
         <button className="btn btn-primary" type="submit" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save and continue'}</button>
