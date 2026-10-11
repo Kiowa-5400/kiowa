@@ -118,6 +118,8 @@ def test_csv_import_club_roster(api, db):
     jane = db.scalar(select(Person).where(Person.email == "jane@example.com"))
     assert (jane.first_name, jane.last_name, jane.city, jane.state, jane.zip_code) == ("Jane", "Doe", "Great Bend", "KS", "67530")
     assert (jane.phone, jane.member_number, jane.nra_number, jane.notes) == ("(620) 555-0100", 1, "123456789", "new address")
+    # Roster members are signed up for texts by club decision.
+    assert jane.sms_opt_in and jane.sms_opt_in_at is not None and jane.sms_opt_in_source == "club_roster"
     # Dues due August 2027 means paid through the September 2026 cutoff.
     assert jane.renewal_date == date(2026, 9, 10) and jane.nra_expiration_date == date(2027, 8, 31)
     rick = db.scalar(select(Person).where(Person.email == "rick@example.com"))
@@ -421,6 +423,23 @@ def test_paid_up_depends_on_dues_season(db):
     assert renewal.renewal_summary(settings_row, paid_2026, date(2026, 10, 2))["is_current"] is True
     # Inside the 45-day window before the 2027 cutoff: now owes 2027 dues.
     assert renewal.renewal_summary(settings_row, paid_2026, date(2027, 8, 1))["is_current"] is False
+
+
+def test_roster_text_sign_up_respects_people_who_turned_texts_off(db):
+    from app.services import membership
+
+    on = _person(db, "on@example.com", phone="(620) 555-0120")
+    off = _person(db, "off@example.com", phone="(620) 555-0121")
+    no_phone = _person(db, "nophone@example.com")
+    contact = _person(db, "contact@example.com", phone="(620) 555-0122", membership_status="non_member")
+    # Unchecking the box on the membership application is remembered as a "no".
+    membership.update_profile(db, off, {"sms_opt_in": False}, source="application")
+    assert off.sms_opt_out_at is not None
+    assert [membership.enroll_roster_member_in_texts(p) for p in (on, off, no_phone, contact)] == [True, False, False, False]
+    assert on.sms_opt_in and on.sms_opt_in_source == "club_roster" and not off.sms_opt_in
+    # Saving the portal profile with the box unchecked is not treated as a refusal.
+    membership.update_profile(db, no_phone, {"sms_opt_in": False}, source="member_portal")
+    assert no_phone.sms_opt_out_at is None
 
 
 def test_people_without_an_email_are_left_out_of_emails(api, db):

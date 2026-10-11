@@ -19,6 +19,8 @@ What it does, in order:
    - Several matches: they are duplicates. Records with nothing attached (no
      account, applications, payments or documents) are folded into the one
      that has, or the oldest; any other duplicate is reported, not touched.
+   Roster members with a mobile number are signed up for texts, unless they
+   have turned texts off.
 3. Reports, without changing them, possible duplicates the roster didn't
    settle and members on file who are not on the roster.
 
@@ -182,6 +184,8 @@ class Sync:
             if note.lower() not in (person.notes or "").lower():
                 changes.append(f"note + {note!r}")
                 person.notes = f"{person.notes}\n{note}" if person.notes else note
+        if membership.enroll_roster_member_in_texts(person):
+            changes.append("signed up for texts")
         if changes:
             self.counts["corrected"] += 1
             print(f"Correct {_label(person)}: " + "; ".join(changes))
@@ -193,6 +197,7 @@ class Sync:
         if not found:
             person = Person(**{k: row[k] for k in ROSTER_FIELDS}, membership_status="member", renewal_date=row["renewal_date"],
                             notes="\n".join(row["notes"]) or None)  # type: ignore[arg-type]
+            membership.enroll_roster_member_in_texts(person)
             self.db.add(person)
             self.db.flush()
             self.people.append(person)

@@ -83,11 +83,11 @@ def update_my_profile(payload: ProfileUpdate, request: Request, auth: MemberAuth
     return member_profile(db, auth.person)
 
 
-def _apply_profile(db: Session, auth: MemberAuth, data: dict[str, object], request: Request) -> None:
+def _apply_profile(db: Session, auth: MemberAuth, data: dict[str, object], request: Request, source: str = "member_portal") -> None:
     for required in ("first_name", "last_name"):
         if required in data and not data[required]:
             raise membership.WorkflowError(f"{required.replace('_', ' ').capitalize()} is required.", {required: "Required."})
-    membership.update_profile(db, auth.person, data, source="member_portal")
+    membership.update_profile(db, auth.person, data, source=source)
     if data:
         audit.record(db, actor=auth.person, action="profile.updated", entity_type="person", entity_id=auth.person.id,
                      details={"fields": sorted(data)}, context=request_context(request))
@@ -187,7 +187,7 @@ def update_application(application_id: int, payload: ApplicationDraftUpdate, req
     if "applicant_notes" in data:
         application.applicant_notes = (data["applicant_notes"] or "").strip() or None
     if payload.profile is not None:
-        _apply_profile(db, auth, payload.profile.model_dump(exclude_unset=True), request)
+        _apply_profile(db, auth, payload.profile.model_dump(exclude_unset=True), request, source="application")
     db.commit()
     db.refresh(application)
     return application_out(db, application)

@@ -39,6 +39,7 @@ class MemberProfile(BaseModel):
     background_check_cleared: bool
     sms_opt_in: bool
     sms_opt_in_at: datetime | None
+    sms_opt_out_at: datetime | None
     email_opt_out: bool
     email_verified: bool
     is_board: bool

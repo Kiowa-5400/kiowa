@@ -204,7 +204,8 @@ def import_people(payload: CsvImport, request: Request, auth: BoardAuth = Depend
     the club roster saved as CSV; see services/roster_import.py for the columns.
     Email is the one thing the import doesn't insist on: a row with a name but
     no usable email is added without one. People already on file (same email,
-    or same name when the row has no email) are skipped, never overwritten."""
+    or same name when the row has no email) are skipped, never overwritten.
+    People added as members with a mobile number are signed up for texts."""
     try:
         rows = list(roster_import.read_rows(payload.csv))
     except ValueError as exc:
@@ -265,14 +266,16 @@ def import_people(payload: CsvImport, request: Request, auth: BoardAuth = Depend
             if row.get(column) and row.get(column).upper() not in ("Y", "YES"):
                 notes.append(f"{label}: {row.get(column)}")
 
-        db.add(Person(
+        person = Person(
             first_name=first_name[:120], last_name=last_name[:120], email=email, phone=phone,
             address_line1=row.get("address_line1")[:255] or None, address_line2=row.get("address_line2")[:255] or None,
             city=row.get("city")[:120] or None, state=row.get("state").upper()[:40] or None, zip_code=row.get("zip_code")[:20] or None,
             membership_status=payload.membership_status, member_number=member_number, renewal_date=renewal_date,
             nra_number=nra_number, nra_expiration_date=nra_expiration_date, nra_life_member=nra_life_member,
             notes="\n".join(notes) or None,
-        ))
+        )
+        membership.enroll_roster_member_in_texts(person)
+        db.add(person)
         db.flush()
         created += 1
     audit.record(db, actor=auth.person, action="person.imported", entity_type="person",

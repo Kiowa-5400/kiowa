@@ -152,6 +152,7 @@ def member_profile(db: Session, person: Person) -> MemberProfile:
         background_check_cleared=person.background_check_cleared,
         sms_opt_in=person.sms_opt_in,
         sms_opt_in_at=person.sms_opt_in_at,
+        sms_opt_out_at=person.sms_opt_out_at,
         email_opt_out=person.email_opt_out,
         email_verified=person.email_verified_at is not None,
         is_board=bool(person.board_user and person.board_user.is_active),

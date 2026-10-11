@@ -87,6 +87,10 @@ def update_profile(db: Session, person: Person, data: dict[str, Any], *, source:
         person.sms_carrier = None
     if "sms_opt_in" in data and data["sms_opt_in"] is not None:
         set_sms_consent(person, bool(data["sms_opt_in"]), source=source)
+        # The application's text box starts checked, so unchecking it is a "no" worth
+        # remembering: it keeps the box unchecked next time and keeps them off roster sign-ups.
+        if source == "application" and not person.sms_opt_in and person.sms_opt_out_at is None:
+            person.sms_opt_out_at = now_utc()
     try:
         with db.begin_nested():
             db.flush()
@@ -109,6 +113,19 @@ def set_sms_consent(person: Person, opted_in: bool, *, source: str) -> None:
     elif not opted_in and person.sms_opt_in:
         person.sms_opt_in = False
         person.sms_opt_out_at = now_utc()
+
+
+def enroll_roster_member_in_texts(person: Person) -> bool:
+    """Club decision (board, October 2026): members brought in from the club
+    roster are signed up for texts without being asked first. Anyone who has
+    turned texts off, here or by replying STOP, is left off."""
+    from app.services.sms import ten_digits
+
+    if (person.membership_status != "member" or person.sms_opt_in or person.sms_opt_out_at is not None
+            or not ten_digits(person.phone)):
+        return False
+    set_sms_consent(person, True, source="club_roster")
+    return True
 
 
 # ---------------------------------------------------------------------------
