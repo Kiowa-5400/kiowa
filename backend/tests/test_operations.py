@@ -85,7 +85,7 @@ def test_csv_import(api, db):
     board(api, db)
     _person(db, "existing@example.com")
     result = api.post("/api/board/people/import", json={"csv": "name,email,phone\nJane Doe,jane@example.com,620-555-0100\nX,existing@example.com,\n,bad,\n"}).json()
-    assert result == {"created": 1, "skipped": 1, "errors": ["Line 4: missing name or email"]}
+    assert result == {"created": 1, "skipped": 1, "errors": ["Line 4: missing name"]}
 
 
 ROSTER_CSV = (
@@ -96,6 +96,7 @@ ROSTER_CSV = (
     "Roe,Rick,PO Box 9,Otis,KS,67565,620-555-0101,2,8/2/2026,27-Aug,987654321,Life,Y,N,rick@example.com,,\r\n"
     "Poe,Pat,1 Elm,Larned,KS,67550,620-555-0102,3,8/2/2026,27-Aug,123456789,26-Nov,Y,Y,pat@example.com, ,\r\n"
     "Bad,Email,1 Oak,Larned,KS,67550,620-555-0103,4,8/2/2026,27-Aug,55555555,Life,Y,Y,bad mail@example.com,,\r\n"
+    "Nomail,Noel,2 Oak,Larned,KS,67550,620-555-0104,5,8/2/2026,27-Aug,66666666,Life,Y,Y,,,\r\n"
     ",,,,,,,,,,,,,,,`,\r\n"
     ",,,,,,,,,,,,,,,,\r\n"
 )
@@ -104,11 +105,16 @@ ROSTER_CSV = (
 def test_csv_import_club_roster(api, db):
     board(api, db)
     result = api.post("/api/board/people/import", json={"csv": ROSTER_CSV}).json()
-    assert result["created"] == 3 and result["skipped"] == 0
+    assert result["created"] == 5 and result["skipped"] == 0
     assert result["errors"] == [
         "Line 6 (Pat Poe): NRA number 123456789 is already on file for someone else; left blank",
-        'Line 7 (Email Bad): "bad mail@example.com" is not a valid email address, so this person was not added',
+        'Line 7 (Email Bad): "bad mail@example.com" is not a valid email address; added without an email',
+        "Line 8 (Noel Nomail): no email; added without one",
     ]
+    assert db.scalar(select(func.count()).select_from(Person).where(Person.email.is_(None))) == 2
+    # Importing the same file again adds no one: people without an email are matched by name.
+    again = api.post("/api/board/people/import", json={"csv": ROSTER_CSV}).json()
+    assert again["created"] == 0 and again["skipped"] == 5
     jane = db.scalar(select(Person).where(Person.email == "jane@example.com"))
     assert (jane.first_name, jane.last_name, jane.city, jane.state, jane.zip_code) == ("Jane", "Doe", "Great Bend", "KS", "67530")
     assert (jane.phone, jane.member_number, jane.nra_number, jane.notes) == ("(620) 555-0100", 1, "123456789", "new address")
@@ -415,6 +421,20 @@ def test_paid_up_depends_on_dues_season(db):
     assert renewal.renewal_summary(settings_row, paid_2026, date(2026, 10, 2))["is_current"] is True
     # Inside the 45-day window before the 2027 cutoff: now owes 2027 dues.
     assert renewal.renewal_summary(settings_row, paid_2026, date(2027, 8, 1))["is_current"] is False
+
+
+def test_people_without_an_email_are_left_out_of_emails(api, db):
+    board(api, db, role="board_member")
+    db.add(Person(first_name="Noel", last_name="Nomail", email=None, membership_status="member", renewal_date=None))
+    db.commit()
+    audience = api.post("/api/board/email/audience", json={"groups": ["active_members"]}).json()
+    assert [r["email"] for r in audience["recipients"] if r["email"] is None] == []
+    people = api.get("/api/board/people?q=Nomail").json()["items"]
+    assert len(people) == 1 and people[0]["email"] is None
+    # An email can be added on the record later; saving other fields without one is fine.
+    assert api.patch(f"/api/board/people/{people[0]['id']}", json={"email": None, "city": "Otis"}).json()["city"] == "Otis"
+    sent = renewal.send_renewal_reminders(db, date(2026, 7, 28))
+    assert sent.failures == 0 and not any(m.to is None for m in email_outbox())
 
 
 def test_renewal_reminders_are_idempotent_and_respect_consent(db):

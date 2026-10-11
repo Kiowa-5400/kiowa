@@ -49,7 +49,7 @@ class PersonSummary(BaseModel):
     id: int
     first_name: str
     last_name: str
-    email: str
+    email: str | None
     phone: str | None
     city: str | None
     membership_status: MembershipStatus

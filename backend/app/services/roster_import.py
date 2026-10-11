@@ -76,7 +76,7 @@ def read_rows(text: str) -> Iterator[RosterRow]:
     for cells in reader:
         if columns is None:
             found = [_FIELD_BY_HEADER.get(_key(c)) if _key(c) else "" for c in cells]
-            if "email" in found and ("name" in found or {"first_name", "last_name"} <= set(found)):
+            if "name" in found or {"first_name", "last_name"} <= set(found):
                 columns = found
             elif reader.line_num >= _HEADER_SEARCH_ROWS:
                 break
@@ -92,7 +92,7 @@ def read_rows(text: str) -> Iterator[RosterRow]:
                 row.values.setdefault(column, cell)
         yield row
     if columns is None:
-        raise ValueError('The header row needs "email" plus "first_name" and "last_name" (or "name").')
+        raise ValueError('The header row needs "first_name" and "last_name" (or "name").')
 
 
 def is_email(value: str) -> bool:

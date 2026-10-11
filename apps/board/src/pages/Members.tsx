@@ -7,7 +7,7 @@ import { useAuth } from '../auth';
 import { PageHeader, Pager, StatusBadge, useDebounced, type GroupCount } from '../components/common';
 
 type Person = {
-  id: number; first_name: string; last_name: string; email: string; phone: string | null; city: string | null;
+  id: number; first_name: string; last_name: string; email: string | null; phone: string | null; city: string | null;
   membership_status: string; groups: string[]; renewal_date: string | null; nra_expiration_date: string | null; nra_life_member: boolean; nra_active: boolean;
   sms_opt_in: boolean; email_opt_out: boolean; pending_documents: number; open_application_status: string | null; has_login: boolean;
 };
@@ -82,7 +82,7 @@ export function MembersPage() {
                   <tr>
                     <td data-label="Name"><Link to={`/members/${p.id}`}>{p.last_name}, {p.first_name}</Link>
                       {p.pending_documents > 0 && <span className="badge badge-warning" style={{ marginLeft: 6 }}>{p.pending_documents} doc{p.pending_documents === 1 ? '' : 's'} to check</span>}</td>
-                    <td data-label="Email">{p.email}</td>
+                    <td data-label="Email">{p.email ?? <span className="muted">No email on file</span>}</td>
                     <td data-label="Status"><StatusBadge status={p.membership_status} label={STATUS_LABELS[p.membership_status]} /></td>
                     <td data-label="Paid through">{formatDate(p.renewal_date, 'medium') || '—'}</td>
                     <td data-label="">
@@ -170,7 +170,7 @@ function ImportPeople({ onDone }: { onDone: () => void }) {
       <ol>
         <li>Use the club roster as it is, or <a href={template} download="kiowa-contacts-template.csv">download the example spreadsheet</a> and fill in one person per row.</li>
         <li>In Excel or Google Sheets, save it as a <strong>CSV</strong> file.</li>
-        <li>Choose that file below. People already on the list (same email) are skipped, never changed.</li>
+        <li>Choose that file below. People already on the list (same email) are skipped, never changed. Someone with no email in the spreadsheet is still added; add their email on their record when you have it.</li>
       </ol>
       <FormErrors error={run.error} />
       <div className="field"><label htmlFor="csv-file">Spreadsheet (.csv)</label>
@@ -269,7 +269,7 @@ export function MemberDetail({ id }: { id: number }) {
 
 function EditPerson({ person, editable, onSaved }: { person: PersonDetail; editable: boolean; onSaved: () => void }) {
   const [form, setForm] = useState({
-    first_name: person.first_name, last_name: person.last_name, email: person.email, phone: person.phone ?? '',
+    first_name: person.first_name, last_name: person.last_name, email: person.email ?? '', phone: person.phone ?? '',
     address_line1: person.address_line1 ?? '', address_line2: person.address_line2 ?? '', city: person.city ?? '', state: person.state ?? '',
     zip_code: person.zip_code ?? '', membership_status: person.membership_status, renewal_date: person.renewal_date ?? '',
     nra_number: person.nra_number ?? '', nra_expiration_date: person.nra_expiration_date ?? '', nra_active: person.nra_active,
@@ -281,7 +281,7 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
   const save = useAction(async () => {
     setSaved(false);
     const blankToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
-    const body = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, k === 'first_name' || k === 'last_name' || k === 'email' ? v : blankToNull(v)]));
+    const body = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, k === 'first_name' || k === 'last_name' ? v : blankToNull(v)]));
     await api(`/api/board/people/${person.id}`, { method: 'PATCH', body });
     setSaved(true);
     onSaved();
@@ -297,7 +297,8 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
       <div className="grid-2">
         <TextField label="First name" required {...text('first_name')} />
         <TextField label="Last name" required {...text('last_name')} />
-        <TextField label="Email" type="email" required {...text('email')} hint={person.email_verified ? 'Verified' : 'Not verified'} />
+        <TextField label="Email" type="email" required={person.email !== null} {...text('email')}
+          hint={person.email === null ? 'None on file. Without one they can\'t sign in or get club emails.' : person.email_verified ? 'Verified' : 'Not verified'} />
         <TextField label="Phone" type="tel" {...text('phone')} error={save.fieldErrors.phone} />
       </div>
       <TextField label="Street address" {...text('address_line1')} />

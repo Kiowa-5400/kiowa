@@ -88,7 +88,9 @@ class Person(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     first_name: Mapped[str] = mapped_column(String(120))
     last_name: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(255))
+    # Required everywhere except the spreadsheet import, which can add a roster
+    # member whose email the club doesn't have yet. No email means no login and no club email.
+    email: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(40))
     address_line1: Mapped[str | None] = mapped_column(String(255))
     address_line2: Mapped[str | None] = mapped_column(String(255))

@@ -191,7 +191,7 @@ def send_renewal_reminders(db: Session, today: date | None = None) -> ReminderRe
         text = _reminder_text(days_out, cycle, pay_link)
         # Email reminder (a notice about their own membership, so it is sent
         # even to people who unsubscribed from newsletters).
-        marker = _claim_reminder(db, person, cycle, threshold, "email")
+        marker = _claim_reminder(db, person, cycle, threshold, "email") if person.email else None
         if marker is not None:
             body = (
                 f"<p>Hi {html.escape(person.first_name)},</p>"
@@ -300,7 +300,7 @@ def run_termination_sweep(db: Session, today: date | None = None) -> dict[str, o
     db.commit()
 
     if unpaid:
-        names = "".join(f"<li>{html.escape(p.full_name)} ({html.escape(p.email)})</li>" for p in unpaid)
+        names = "".join(f"<li>{html.escape(p.full_name)} ({html.escape(p.email or "no email")})</li>" for p in unpaid)
         from app.services.people import active_board_people
 
         for board_person in active_board_people(db):

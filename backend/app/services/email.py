@@ -213,8 +213,10 @@ def button(url: str, label: str) -> str:
     )
 
 
-def send_transactional(to: str, subject: str, body_html: str) -> SendResult:
+def send_transactional(to: str | None, subject: str, body_html: str) -> SendResult:
     """Account/payment/application notices. Not subject to newsletter opt-out."""
+    if not to:
+        return SendResult(message_id=None, error="No email address on file.")
     message = EmailMessage(
         to=to,
         subject=subject,

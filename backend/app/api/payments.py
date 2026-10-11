@@ -34,7 +34,7 @@ class PaymentRow(BaseModel):
     id: int
     person_id: int
     person_name: str
-    person_email: str
+    person_email: str | None
     application_id: int | None
     application_type: str | None
     amount: Decimal

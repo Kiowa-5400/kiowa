@@ -7,7 +7,7 @@ import { useAuth } from '../auth';
 import { PageHeader, Pager, StatusBadge, useDebounced } from '../components/common';
 
 type Payment = {
-  id: number; person_id: number; person_name: string; person_email: string; application_id: number | null; application_type: string | null;
+  id: number; person_id: number; person_name: string; person_email: string | null; application_id: number | null; application_type: string | null;
   amount: string; refunded_amount: string; status: string; method: string; paid_at: string | null; created_at: string;
   covers_through: string | null; failure_reason: string | null; notes: string | null; claims_discount: boolean; has_discount_document: boolean;
 };

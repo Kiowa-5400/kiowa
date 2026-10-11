@@ -125,7 +125,7 @@ class BoardApplicationSummary(BaseModel):
     id: int
     person_id: int
     applicant_name: str
-    applicant_email: str
+    applicant_email: str | None
     application_type: ApplicationType
     status: str
     status_label: str

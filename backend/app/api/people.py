@@ -157,7 +157,8 @@ def update_person(person_id: int, payload: PersonUpdate, request: Request, auth:
     context = request_context(request)
     changes: dict[str, object] = {}
 
-    if "email" in data and data["email"] != person.email:
+    # A blank email is ignored: an address can be added or changed here, never removed.
+    if data.get("email") and data["email"] != person.email:
         other = find_person_by_email(db, data["email"])
         if other is not None and other.id != person.id:
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Another contact already uses that email.")
@@ -201,7 +202,9 @@ def update_person(person_id: int, payload: PersonUpdate, request: Request, auth:
 def import_people(payload: CsvImport, request: Request, auth: BoardAuth = Depends(can_edit), db: Session = Depends(get_db)) -> dict[str, object]:
     """Spreadsheet import (ported from kiowa-gun). Takes the app's template or
     the club roster saved as CSV; see services/roster_import.py for the columns.
-    Existing emails are skipped, never overwritten."""
+    Email is the one thing the import doesn't insist on: a row with a name but
+    no usable email is added without one. People already on file (same email,
+    or same name when the row has no email) are skipped, never overwritten."""
     try:
         rows = list(roster_import.read_rows(payload.csv))
     except ValueError as exc:
@@ -213,15 +216,24 @@ def import_people(payload: CsvImport, request: Request, auth: BoardAuth = Depend
         if row.get("name") and not first_name:
             parts = row.get("name").split()
             first_name, last_name = (parts[0] if parts else ""), " ".join(parts[1:])
-        email = row.get("email").lower()
-        if not email or not first_name:
-            errors.append(f"Line {row.line}: missing name or email")
+        email: str | None = row.get("email").lower() or None
+        if not first_name:
+            errors.append(f"Line {row.line}: missing name")
             continue
         who = f"Line {row.line} ({first_name} {last_name})".replace(" )", ")")
-        if not roster_import.is_email(email):
-            errors.append(f'{who}: "{email}" is not a valid email address, so this person was not added')
-            continue
-        if find_person_by_email(db, email):
+        if email and not roster_import.is_email(email):
+            errors.append(f'{who}: "{email}" is not a valid email address; added without an email')
+            email = None
+        elif not email:
+            errors.append(f"{who}: no email; added without one")
+        if email:
+            existing = find_person_by_email(db, email)
+        else:
+            existing = db.scalar(select(Person.id).where(func.lower(Person.first_name) == first_name.lower(),
+                                                         func.lower(Person.last_name) == last_name.lower()))
+        if existing:
+            if not email:
+                errors.pop()
             skipped += 1
             continue
 
@@ -302,6 +314,8 @@ def export_contacts(
         conditions = search_conditions(None, group, None)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if export_format == "mailing_list":
+        conditions.append(Person.email.is_not(None))
     if export_format == "mailing_list" and not include_opted_out:
         conditions.append(Person.email_opt_out.is_(False))
     if export_format == "postal_labels":

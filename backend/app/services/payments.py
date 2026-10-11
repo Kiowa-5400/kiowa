@@ -316,7 +316,7 @@ def _flag_duplicate(db: Session, payment: Payment, source: str) -> None:
             email_service.send_transactional(
                 board_person.email,
                 "Duplicate dues payment needs a refund",
-                f"<p>{html.escape(person.full_name)} ({html.escape(person.email)}) was charged "
+                f"<p>{html.escape(person.full_name)} ({html.escape(person.email or "no email")}) was charged "
                 f"<strong>${payment.amount:.2f}</strong> for dues that were already paid. Their membership was not "
                 f"extended again. Please refund this payment from the Payments page of the board site.</p>",
             )

@@ -51,6 +51,10 @@ def _audience(db: Session, audience: Audience) -> list[Person]:
     return people
 
 
+def _email_audience(db: Session, audience: Audience) -> list[Person]:
+    return [p for p in _audience(db, audience) if p.email]
+
+
 def _summary(audience: Audience, db: Session) -> str:
     parts = [GROUPS[g] for g in audience.groups if g in GROUPS]
     if audience.person_ids:
@@ -82,7 +86,7 @@ def _campaign_footer(page_link: str) -> str:
 
 @router.post("/email/audience")
 def email_audience(payload: Audience, auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
-    people = _audience(db, payload)
+    people = _email_audience(db, payload)
     included = [p for p in people if not p.email_opt_out]
     return {
         "count": len(included),
@@ -121,7 +125,7 @@ class EmailSend(EmailDraft, Audience):
 
 @router.post("/email/send")
 def send_email(payload: EmailSend, request: Request, auth: BoardAuth = Depends(can_send), db: Session = Depends(get_db)) -> dict[str, object]:
-    people = [p for p in _audience(db, payload) if not p.email_opt_out]
+    people = [p for p in _email_audience(db, payload) if not p.email_opt_out]
     if not people:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No recipients selected (or everyone selected has unsubscribed).")
     assets = db.scalars(select(EmailAsset).where(EmailAsset.id.in_(payload.attachment_ids), EmailAsset.kind == "attachment")).all()
@@ -275,7 +279,7 @@ class SmsSend(SmsCheck, Audience):
 
 def _email_fallback(person: Person, body: str) -> email_service.SendResult | None:
     """Emails the text to someone whose text couldn't be sent. Respects club-email unsubscribes."""
-    if person.email_opt_out:
+    if person.email_opt_out or not person.email:
         return None
     page_link, one_click = unsubscribe_links(person)
     html_body = (

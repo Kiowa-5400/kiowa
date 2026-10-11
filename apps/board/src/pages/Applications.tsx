@@ -6,7 +6,7 @@ import { Alert, Checkbox, Empty, ErrorState, FormErrors, Loading, TextArea, useA
 import { PageHeader, Pager, StatusBadge, useDebounced } from '../components/common';
 
 type Summary = {
-  id: number; person_id: number; applicant_name: string; applicant_email: string; application_type: 'renewal' | 'waiting_list';
+  id: number; person_id: number; applicant_name: string; applicant_email: string | null; application_type: 'renewal' | 'waiting_list';
   status: string; status_label: string; submitted_at: string | null; payment_status: string; payment_eligible: boolean;
   payment_block_reason: string | null; pending_documents: number;
 };
