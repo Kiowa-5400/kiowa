@@ -27,11 +27,11 @@ from app.api.serializers import (
 from app.core.permissions import Permission
 from app.core.timeutil import club_today, now_utc
 from app.models import Application, Document, EmailRecipient, Payment, Person, SmsRecipient
-from app.schemas.common import Page
+from app.schemas.common import Message, Page
 from app.schemas.common import _phone as normalize_phone
 from app.schemas.membership import BoardApplicationSummary, DocumentOut, PaymentSummary
 from app.schemas.people import CsvImport, PersonCreate, PersonDetail, PersonSummary, PersonUpdate
-from app.services import audit, membership, roster_import
+from app.services import audit, duplicates, membership, roster_import
 from app.services.auth import find_person_by_email
 from app.services.people import GROUPS, group_condition, search_conditions
 
@@ -54,6 +54,64 @@ def group_counts(auth: BoardAuth = Depends(can_view), db: Session = Depends(get_
         {"key": key, "label": label, "count": db.scalar(select(func.count()).select_from(Person).where(group_condition(key))) or 0}
         for key, label in GROUPS.items()
     ]
+
+
+# ------------------------------------------------------- duplicates ----
+
+
+def _card(values: Person | dict[str, object], person_id: int) -> dict[str, object]:
+    """The few details the board compares when deciding whether two records are one person."""
+    get = values.get if isinstance(values, dict) else lambda key: getattr(values, key)
+    address = ", ".join(str(v) for v in (get("address_line1"), get("city"), get("state")) if v)
+    return {"id": person_id, "first_name": get("first_name"), "last_name": get("last_name"), "email": get("email"),
+            "phone": get("phone"), "address": address or None, "membership_status": get("membership_status"),
+            "renewal_date": get("renewal_date"), "member_number": get("member_number"), "nra_number": get("nra_number"),
+            "has_login": bool(get("password_hash"))}
+
+
+@router.get("/people/duplicates")
+def possible_duplicates(auth: BoardAuth = Depends(can_view), db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    return [{"keep": _card(a, a.id), "other": _card(b, b.id)} for a, b in duplicates.all_matches(db)]
+
+
+@router.get("/people/{person_id}/matches")
+def person_matches(person_id: int, auth: BoardAuth = Depends(can_view), db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    return [_card(p, p.id) for p in duplicates.matches_for(db, _get(db, person_id))]
+
+
+def _two(db: Session, person_id: int, other_id: int) -> tuple[Person, Person]:
+    if person_id == other_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="That's the same record.")
+    return duplicates.keeper_first(_get(db, person_id), _get(db, other_id))
+
+
+@router.get("/people/{person_id}/combine/{other_id}")
+def combine_preview(person_id: int, other_id: int, auth: BoardAuth = Depends(can_edit), db: Session = Depends(get_db)) -> dict[str, object]:
+    keep, other = _two(db, person_id, other_id)
+    result = duplicates.preview(db, keep, other)
+    return {"keep": _card(keep, keep.id), "other": _card(other, other.id), "combined": _card(result["values"], keep.id),
+            "notes": result["notes"], "problem": result["problem"]}
+
+
+@router.post("/people/{person_id}/combine/{other_id}")
+def combine_people(person_id: int, other_id: int, request: Request, auth: BoardAuth = Depends(can_edit),
+                   db: Session = Depends(get_db)) -> dict[str, int]:
+    keep, other = _two(db, person_id, other_id)
+    try:
+        duplicates.combine(db, keep, other, auth.person, request_context(request))
+    except duplicates.CombineError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return {"person_id": keep.id}
+
+
+@router.post("/people/{person_id}/not-duplicate/{other_id}", response_model=Message)
+def not_duplicate(person_id: int, other_id: int, request: Request, auth: BoardAuth = Depends(can_edit),
+                  db: Session = Depends(get_db)) -> Message:
+    keep, other = _two(db, person_id, other_id)
+    duplicates.mark_different(db, keep, other, auth.person, request_context(request))
+    db.commit()
+    return Message(message="Got it. They won't be flagged again.")
 
 
 @router.get("/people", response_model=Page[PersonSummary])

@@ -1,10 +1,11 @@
 import { Fragment, useState } from 'react';
 import { api, downloadFile, type Page } from '@shared/api';
 import { formatDate, formatDateTime, formatMoney, STATUS_LABELS, titleCase } from '@shared/format';
-import { Link, useLocation, usePageTitle } from '@shared/router';
+import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, Empty, ErrorState, FormErrors, Loading, Modal, SelectField, TextArea, TextField, useAction, useAsync } from '@shared/ui';
 import { useAuth } from '../auth';
 import { PageHeader, Pager, StatusBadge, useDebounced, type GroupCount } from '../components/common';
+import { DuplicatesNotice, PersonDuplicates } from '../components/Duplicates';
 
 type Person = {
   id: number; first_name: string; last_name: string; email: string | null; phone: string | null; city: string | null;
@@ -55,6 +56,8 @@ export function MembersPage() {
           {can('members.edit') && <button type="button" className="btn" onClick={() => setImporting(true)}>Import a spreadsheet</button>}
           {can('members.export') && <button type="button" className="btn" onClick={() => setExporting(true)}>Download a list</button>}
         </>} />
+
+      <DuplicatesNotice canEdit={can('members.edit')} onChanged={() => { list.reload(); groups.reload(); }} />
 
       <div className="filters">
         <div className="field"><label htmlFor="m-q">Search</label><input id="m-q" type="search" placeholder="Name, email, phone or NRA number" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></div>
@@ -231,6 +234,8 @@ export function MemberDetail({ id }: { id: number }) {
       <PageHeader title={`${person.first_name} ${person.last_name}`}
         description={<><StatusBadge status={person.membership_status} label={STATUS_LABELS[person.membership_status]} /> {person.board_role && <span className="badge">Board: {titleCase(person.board_role)}</span>}</>}
         actions={<Link className="btn btn-ghost" to="/members">Back to list</Link>} />
+      <PersonDuplicates personId={person.id} canEdit={can('members.edit')}
+        onCombined={(kept) => (kept === person.id ? record.reload() : navigate(`/members/${kept}`))} />
       <div className="detail-grid">
         <EditPerson person={person} editable={can('members.edit')} onSaved={record.reload} />
         <aside className="stack">

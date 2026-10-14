@@ -168,6 +168,18 @@ class BoardUser(TimestampMixin, Base):
     person: Mapped[Person] = relationship(back_populates="board_user", foreign_keys=[person_id])
 
 
+class NotDuplicate(Base):
+    """Two records the board confirmed are different people (say, a couple sharing
+    a landline), so they stop being flagged as possibly the same person.
+    Stored with the lower id first."""
+
+    __tablename__ = "not_duplicates"
+
+    person_a_id: Mapped[int] = mapped_column(ForeignKey("people.id", ondelete="CASCADE"), primary_key=True)
+    person_b_id: Mapped[int] = mapped_column(ForeignKey("people.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=func.now())
+
+
 class PositionOption(Base):
     __tablename__ = "position_options"
 

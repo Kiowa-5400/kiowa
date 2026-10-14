@@ -141,9 +141,24 @@ def open_application(db: Session, person: Person) -> Application | None:
     )
 
 
+def roster_match(db: Session, person: Person) -> Person | None:
+    """A current or former member who looks like this person under another record
+    (see services/duplicates.py), unless the board said they're different people."""
+    from app.services.duplicates import ROSTER_STATUSES, matches_for
+
+    return next((p for p in matches_for(db, person) if p.membership_status in ROSTER_STATUSES), None)
+
+
 def _check_waiting_list_allowed(db: Session, person: Person) -> None:
     if person.membership_status == "member":
         raise WorkflowError("You're already an active member. Choose a membership renewal instead.")
+    if roster_match(db, person) is not None:
+        raise WorkflowError(
+            "The club roster already lists a member with your name and phone number. Please contact the board so "
+            "they can connect this account to your membership; then you can renew instead of joining the waiting list.",
+            {"application_type": "You may already be on the club roster."},
+            409,
+        )
     if not site_settings(db).accepting_waiting_list:
         raise WorkflowError("The club isn't accepting new waiting-list applications right now.")
 
@@ -258,6 +273,9 @@ def submit_application(
     if application.status not in ("draft", "needs_info"):
         raise WorkflowError("This application has already been submitted.", status_code=409)
     person = application.person
+    if application.application_type == "waiting_list" and roster_match(db, person) is not None:
+        # The phone is usually filled in after the draft was started, so check again here.
+        _check_waiting_list_allowed(db, person)
     settings_row = site_settings(db)
     errors: dict[str, str] = {}
 

@@ -625,3 +625,27 @@ def test_end_to_end_waiting_list(api, new_api, db, gateway):
     post_webhook(api, completed_event(session))
     profile = api.get("/api/me").json()
     assert profile["membership_status"] == "member" and profile["member_since"] == date.today().isoformat()
+
+
+def test_roster_member_with_new_account_cannot_join_waiting_list(api, db):
+    """Signing up only finds an existing record by email, so a roster member the club had
+    no email for ends up with a second record; it must not slip onto the waiting list."""
+    db.add(Person(first_name="Joe", last_name="Felke", phone="(620) 555-0100", membership_status="member"))
+    db.commit()
+    member(api, "joseph@example.com", **{**FULL_PROFILE, "phone": "620.555.0100"})
+    api.patch("/api/me", json={"last_name": "felke"})
+    refused = api.post("/api/applications", json={"application_type": "waiting_list"})
+    assert refused.status_code == 409 and "contact the board" in refused.json()["detail"]
+
+
+def test_roster_match_is_checked_again_on_submit(api, db):
+    member(api, "late@example.com", **{**FULL_PROFILE, "phone": None})
+    application = start(api, "waiting_list")
+    db.add(Person(first_name="Pat", last_name="Shooter", phone="620-555-0100", membership_status="expired"))
+    db.commit()
+    api.patch("/api/me", json={"phone": "620-555-0100"})
+    api.patch(f"/api/applications/{application['id']}", json={"documentation_method": "concealed_carry"})
+    upload(api, application["id"], "nra_proof")
+    upload(api, application["id"], "concealed_carry", JPEG, "ccl.jpg", "image/jpeg")
+    response = submit(api, application["id"])
+    assert response.status_code == 409 and "contact the board" in response.json()["detail"]
