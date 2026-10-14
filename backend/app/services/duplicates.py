@@ -192,11 +192,14 @@ def preview(db: Session, keep: Person, other: Person) -> dict[str, Any]:
         notes.append(f"They'll sign in to the member website with {values['email']} and the password they already use.")
     elif values["email"]:
         notes.append(f"Club emails will go to {values['email']}.")
-    for label, a, b in (("email", keep.email, other.email), ("phone number", keep.phone, other.phone),
-                        ("address", keep.address_line1, other.address_line1)):
-        chosen = values["email"] if label == "email" else values["phone"] if label == "phone number" else values["address_line1"]
-        dropped = b if chosen == a else a
-        if a and b and a.strip().lower() != b.strip().lower():
+    def same(label: str, a: str, b: str) -> bool:
+        # (620) 555-0177 and 620-555-0177 are the same number.
+        return ten_digits(a) == ten_digits(b) if label == "phone number" else a.strip().lower() == b.strip().lower()
+
+    for label, key in (("email", "email"), ("phone number", "phone"), ("address", "address_line1")):
+        a, b = getattr(keep, key), getattr(other, key)
+        if a and b and not same(label, a, b):
+            dropped = b if values[key] == a else a
             notes.append(f"The {label} {dropped} won't be kept. You can change it on their page afterwards.")
     notes.append("Their payments, documents, applications and message history will all be kept together.")
     return {"keep": keep, "other": other, "values": values, "notes": notes, "problem": problem}

@@ -5,7 +5,7 @@ import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
 import { Alert, Checkbox, Empty, ErrorState, FormErrors, Loading, Modal, SelectField, TextArea, TextField, useAction, useAsync } from '@shared/ui';
 import { useAuth } from '../auth';
 import { PageHeader, Pager, StatusBadge, useDebounced, type GroupCount } from '../components/common';
-import { DuplicatesNotice, PersonDuplicates } from '../components/Duplicates';
+import { DuplicatesNotice, FindDuplicateCard, PersonMatchAlerts } from '../components/Duplicates';
 
 type Person = {
   id: number; first_name: string; last_name: string; email: string | null; phone: string | null; city: string | null;
@@ -228,14 +228,14 @@ export function MemberDetail({ id }: { id: number }) {
   if (record.loading && !record.data) return <Loading />;
   if (record.error || !record.data) return <ErrorState message={record.error ?? 'Not found'} onRetry={record.reload} />;
   const { person, applications, payments, documents, communications } = record.data;
+  const afterCombine = (kept: number) => (kept === person.id ? record.reload() : navigate(`/members/${kept}`));
 
   return (
     <div className="stack">
       <PageHeader title={`${person.first_name} ${person.last_name}`}
         description={<><StatusBadge status={person.membership_status} label={STATUS_LABELS[person.membership_status]} /> {person.board_role && <span className="badge">Board: {titleCase(person.board_role)}</span>}</>}
         actions={<Link className="btn btn-ghost" to="/members">Back to list</Link>} />
-      <PersonDuplicates personId={person.id} canEdit={can('members.edit')}
-        onCombined={(kept) => (kept === person.id ? record.reload() : navigate(`/members/${kept}`))} />
+      <PersonMatchAlerts personId={person.id} canEdit={can('members.edit')} onCombined={afterCombine} />
       <div className="detail-grid">
         <EditPerson person={person} editable={can('members.edit')} onSaved={record.reload} />
         <aside className="stack">
@@ -266,6 +266,7 @@ export function MemberDetail({ id }: { id: number }) {
               <p key={i} className="small">{c.channel === 'email' ? '✉' : '💬'} {c.subject} · {c.status}{c.opened_at && ', opened'} · {formatDateTime(c.sent_at)}</p>
             ))}
           </section>
+          <FindDuplicateCard personId={person.id} canEdit={can('members.edit')} onCombined={afterCombine} />
         </aside>
       </div>
     </div>

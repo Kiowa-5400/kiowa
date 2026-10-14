@@ -118,22 +118,14 @@ export function DuplicatesNotice({ canEdit, onChanged }: { canEdit: boolean; onC
   );
 }
 
-/** A person's page: flags likely matches, and lets the board pick one by hand when the site didn't spot it. */
-export function PersonDuplicates({ personId, canEdit, onCombined }: { personId: number; canEdit: boolean; onCombined: (keptId: number) => void }) {
+/** Top of a person's page: a warning for each record that looks like the same person. */
+export function PersonMatchAlerts({ personId, canEdit, onCombined }: { personId: number; canEdit: boolean; onCombined: (keptId: number) => void }) {
   const matches = useAsync((signal) => api<PersonCard[]>(`/api/board/people/${personId}/matches`, { signal }), [personId]);
   const [reviewing, setReviewing] = useState<number | null>(null);
-  const [searching, setSearching] = useState(false);
-  if (!canEdit) return null;
-  const done = (kept: number | null) => {
-    setReviewing(null);
-    setSearching(false);
-    if (kept) onCombined(kept);
-    else matches.reload();
-  };
-
+  if (!canEdit || !matches.data?.length) return null;
   return (
     <>
-      {matches.data?.map((m) => (
+      {matches.data.map((m) => (
         <Alert key={m.id} kind="warning" title="This may be the same person as another record.">
           <span className="row">
             <span>{fullName(m)} ({STATUS_LABELS[m.membership_status]}) has the same last name and phone number.</span>
@@ -141,15 +133,27 @@ export function PersonDuplicates({ personId, canEdit, onCombined }: { personId: 
           </span>
         </Alert>
       ))}
-      <section className="card stack-sm">
-        <h2>Listed twice?</h2>
-        {searching ? <FindPerson excludeId={personId} onPick={setReviewing} onCancel={() => setSearching(false)} /> : <>
-          <p className="small muted">If this person has a second record, you can combine the two.</p>
-          <div><button type="button" className="btn btn-sm" onClick={() => setSearching(true)}>Find their other record</button></div>
-        </>}
-      </section>
-      <CombineDialog personId={personId} otherId={reviewing} onClose={() => setReviewing(null)} onDone={done} />
+      <CombineDialog personId={personId} otherId={reviewing} onClose={() => setReviewing(null)}
+        onDone={(kept) => { setReviewing(null); if (kept) onCombined(kept); else matches.reload(); }} />
     </>
+  );
+}
+
+/** Side of a person's page: pick their other record by hand when the site didn't spot it. */
+export function FindDuplicateCard({ personId, canEdit, onCombined }: { personId: number; canEdit: boolean; onCombined: (keptId: number) => void }) {
+  const [reviewing, setReviewing] = useState<number | null>(null);
+  const [searching, setSearching] = useState(false);
+  if (!canEdit) return null;
+  return (
+    <section className="card stack-sm">
+      <h2>Listed twice?</h2>
+      {searching ? <FindPerson excludeId={personId} onPick={setReviewing} onCancel={() => setSearching(false)} /> : <>
+        <p className="small muted">If this person has a second record, you can combine the two.</p>
+        <div><button type="button" className="btn btn-sm" onClick={() => setSearching(true)}>Find their other record</button></div>
+      </>}
+      <CombineDialog personId={personId} otherId={reviewing} onClose={() => setReviewing(null)}
+        onDone={(kept) => { setReviewing(null); setSearching(false); if (kept) onCombined(kept); }} />
+    </section>
   );
 }
 

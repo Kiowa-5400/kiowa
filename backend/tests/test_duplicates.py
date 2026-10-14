@@ -87,3 +87,14 @@ def test_cannot_combine_two_board_sign_ins(api, db):
     db.expire_all()
     assert db.get(Person, signup.id) is not None
 
+
+
+def test_preview_only_warns_about_details_that_really_differ(api, db):
+    board(api, db)
+    roster, signup = _roster_and_signup(db)  # same phone number, written two ways
+    signup.address_line1 = "9 Other Rd"
+    roster.address_line1 = "14 SE 35 Ave."
+    db.commit()
+    notes = api.get(f"/api/board/people/{roster.id}/combine/{signup.id}").json()["notes"]
+    assert not any("phone number" in n for n in notes)
+    assert any("The address 9 Other Rd won't be kept" in n for n in notes)
