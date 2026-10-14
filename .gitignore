@@ -24,3 +24,6 @@ __pycache__/
 .storage/
 backend/.venv/
 backend/venv/
+
+# Board how-to guides (PDFs) are shared directly, not kept in the repo.
+docs/guides/

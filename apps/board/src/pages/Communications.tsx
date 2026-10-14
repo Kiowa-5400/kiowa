@@ -206,8 +206,14 @@ export function SmsPage() {
         <TextArea label="Message" required maxLength={1600} value={text} onChange={(e) => setText(e.target.value)} hint={`${text.length} characters. Texts over 160 characters are split into parts.`} />
         <div className="field">
           <label htmlFor="sms-pic">Picture (optional)</label>
-          <input id="sms-pic" type="file" accept="image/jpeg,image/png,image/gif" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload.run(f); }} />
-          {picture && <img src={picture.url} alt="" className="thumb" />}
+          <input id="sms-pic" type="file" accept="image/jpeg,image/png,image/gif" disabled={upload.busy}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload.run(f); e.target.value = ''; }} />
+          {picture && (
+            <div className="row">
+              <img src={picture.url} alt="" className="thumb" />
+              <button type="button" className="btn btn-sm" onClick={() => setPicture(null)}>Remove picture</button>
+            </div>
+          )}
           {upload.error && <span className="error">{upload.error}</span>}
         </div>
         <div><button className="btn btn-primary" type="submit" disabled={check.busy}>Review before sending</button></div>
