@@ -49,17 +49,17 @@ def cutoff_date(settings_row: SiteSettings, year: int) -> date:
 
 
 def next_cutoff_after_payment(settings_row: SiteSettings, current_renewal_date: date | None, today: date) -> date:
-    """The cutoff a payment made ``today`` should count toward: the next cutoff
-    still ahead of today and strictly after whatever is already paid through
-    (so renewing early extends to the following year instead of re-stamping)."""
-    year = today.year
-    candidate = cutoff_date(settings_row, year)
-    if today > candidate:
-        year += 1
-        candidate = cutoff_date(settings_row, year)
+    """The cutoff a payment made ``today`` counts toward.
+
+    Dues pay for the membership year that's under way (August through July for
+    a September 10 cutoff), so a payment counts toward the cutoff a member has to
+    have paid to be paid up today (see ``dues_target_cutoff``): the most recent
+    one, or the upcoming one once its reminders have started. Someone already
+    paid for that is paying ahead, which extends them a year instead of
+    re-stamping."""
+    candidate = dues_target_cutoff(settings_row, today)
     while current_renewal_date and current_renewal_date >= candidate:
-        year += 1
-        candidate = cutoff_date(settings_row, year)
+        candidate = cutoff_date(settings_row, candidate.year + 1)
     return candidate
 
 

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api, downloadFile, type Page } from '@shared/api';
 import { formatDate, formatDateTime, formatMoney, STATUS_LABELS, titleCase } from '@shared/format';
 import { Link, navigate, useLocation, usePageTitle } from '@shared/router';
@@ -284,6 +284,11 @@ function EditPerson({ person, editable, onSaved }: { person: PersonDetail; edita
     sms_opt_in: person.sms_opt_in, email_opt_out: person.email_opt_out, notes: person.notes ?? '',
   });
   const [saved, setSaved] = useState(false);
+  // Recording a payment changes the status and paid-through date behind this form. Pick those up, or
+  // the next "Save changes" would write the old values back and undo the payment.
+  useEffect(() => {
+    setForm((f) => ({ ...f, membership_status: person.membership_status, renewal_date: person.renewal_date ?? '' }));
+  }, [person.membership_status, person.renewal_date]);
   const save = useAction(async () => {
     setSaved(false);
     const blankToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);

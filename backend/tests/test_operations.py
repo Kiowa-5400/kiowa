@@ -409,7 +409,13 @@ def test_httpsms_replies_update_consent_and_are_confirmed(api, db, monkeypatch, 
 def test_next_cutoff_after_payment(db):
     settings_row = db.get(SiteSettings, 1)
     assert renewal.next_cutoff_after_payment(settings_row, None, date(2026, 8, 1)) == date(2026, 9, 10)
-    assert renewal.next_cutoff_after_payment(settings_row, None, date(2026, 9, 11)) == date(2027, 9, 10)
+    # Paying after the cutoff covers the membership year already under way (Aug 1 - Jul 31), not the next one.
+    assert renewal.next_cutoff_after_payment(settings_row, None, date(2026, 9, 11)) == date(2026, 9, 10)
+    assert renewal.next_cutoff_after_payment(settings_row, date(2025, 9, 10), date(2026, 10, 14)) == date(2026, 9, 10)
+    # Someone already paid for this year who pays again is paying for next year.
+    assert renewal.next_cutoff_after_payment(settings_row, date(2026, 9, 10), date(2026, 10, 14)) == date(2027, 9, 10)
+    # Once next year's reminders start, a payment is for next year.
+    assert renewal.next_cutoff_after_payment(settings_row, date(2025, 9, 10), date(2026, 7, 30)) == date(2026, 9, 10)
     # Renewing early extends to the following year rather than re-stamping.
     assert renewal.next_cutoff_after_payment(settings_row, date(2026, 9, 10), date(2026, 8, 1)) == date(2027, 9, 10)
 
@@ -499,7 +505,7 @@ def test_february_29_cutoff_is_honored_every_year(db):
     settings_row.renewal_cutoff_month, settings_row.renewal_cutoff_day = 2, 29
     assert renewal.cutoff_date(settings_row, 2028) == date(2028, 2, 29)
     assert renewal.cutoff_date(settings_row, 2029) == date(2029, 2, 28)  # used to raise ValueError
-    assert renewal.next_cutoff_after_payment(settings_row, None, date(2028, 10, 1)) == date(2029, 2, 28)
+    assert renewal.next_cutoff_after_payment(settings_row, None, date(2029, 1, 20)) == date(2029, 2, 28)
     assert renewal.current_cycle_cutoff(settings_row, date(2029, 1, 1)) == date(2029, 2, 28)
 
 
