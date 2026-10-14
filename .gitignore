@@ -25,5 +25,9 @@ __pycache__/
 backend/.venv/
 backend/venv/
 
+# Club rosters hold members' addresses and phone numbers.
+/*.csv
+
 # Board how-to guides (PDFs) are shared directly, not kept in the repo.
 docs/guides/
+docs/board-guides/
