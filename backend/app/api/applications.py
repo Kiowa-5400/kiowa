@@ -111,6 +111,19 @@ def decline(application_id: int, payload: DeclineRequest, request: Request, auth
     return board_application_detail(db, application)
 
 
+@router.post("/applications/{application_id}/close-already-member", response_model=BoardApplicationDetail)
+def close_already_member(application_id: int, request: Request, auth: BoardAuth = Depends(can_review),
+                         db: Session = Depends(get_db)) -> BoardApplicationDetail:
+    """Closes a waiting-list application from someone who is already an active member. No email is sent."""
+    application = _get(db, application_id)
+    if not membership.member_skips_waiting_list(application):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="This application can't be closed this way.")
+    membership.close_unneeded_waiting_list(db, application.person, auth.person, request_context(request))
+    db.commit()
+    db.refresh(application)
+    return board_application_detail(db, application)
+
+
 @router.post("/applications/{application_id}/request-info", response_model=BoardApplicationDetail)
 def request_info(application_id: int, payload: InfoRequest, request: Request, auth: BoardAuth = Depends(can_review),
                  db: Session = Depends(get_db)) -> BoardApplicationDetail:

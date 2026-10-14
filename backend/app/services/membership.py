@@ -403,6 +403,8 @@ def evaluate_payment_eligibility(db: Session, application: Application, today: d
         reasons.append("Your NRA membership has expired.")
     if application.application_type == "waiting_list" and not person.background_check_cleared:
         reasons.append("Your background check has not been cleared by the board.")
+    if member_skips_waiting_list(application):
+        reasons.append("You're already an active member, so this waiting-list application isn't needed.")
     # A renewal started earlier can't pay for a year that's already been paid since.
     if application.application_type == "renewal" and application.status != "completed":
         if renewed := already_renewed_reason(person, today):
@@ -412,6 +414,26 @@ def evaluate_payment_eligibility(db: Session, application: Application, today: d
     if amount < Decimal("0.50"):
         reasons.append("The amount due is too small to charge online; contact the treasurer.")
     return Eligibility(eligible=not reasons, reasons=reasons, amount=amount)
+
+
+def member_skips_waiting_list(application: Application) -> bool:
+    """An open waiting-list application from someone who is already an active member, say because
+    the roster import made them one after they applied. They don't need it and mustn't pay for it."""
+    return (application.application_type == "waiting_list" and application.status in OPEN_STATUSES
+            and application.payment_status not in ("paid", "pending") and application.person.membership_status == "member")
+
+
+def close_unneeded_waiting_list(db: Session, person: Person, actor: Person | None, context: RequestContext | None) -> list[Application]:
+    """Withdraws an active member's open waiting-list application. No email is sent."""
+    closed = [a for a in person.applications if member_skips_waiting_list(a)]
+    for application in closed:
+        application.status = "withdrawn"
+        application.payment_requested_at = None
+        refresh_eligibility(db, application)
+        audit.record(db, actor=actor, action="application.withdrawn", entity_type="application", entity_id=application.id,
+                     summary=f"Closed {person.full_name}'s waiting-list application: already an active member",
+                     context=context)
+    return closed
 
 
 def refresh_eligibility(db: Session, application: Application) -> Eligibility:
@@ -480,6 +502,9 @@ def approve_application(db: Session, application: Application, actor: Person, op
     if options.approve_discount is not None and application.claims_cleanup_discount:
         application.discount_approved = options.approve_discount
 
+    if member_skips_waiting_list(application):
+        raise WorkflowError(f"{person.full_name} is already an active member, so this waiting-list application isn't "
+                            "needed. Use \"Close this application\" instead.", status_code=409)
     problems: list[str] = []
     if application.nra_verified_at is None:
         problems.append("Verify the applicant's NRA proof before approving.")

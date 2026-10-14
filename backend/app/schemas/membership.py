@@ -148,6 +148,8 @@ class BoardApplicationDetail(ApplicationOut):
     reviewed_at: datetime | None
     signature_ip: str | None
     notes: list[NoteOut]
+    # An active member's open waiting-list application: the board can close it without emailing them.
+    already_member: bool = False
 
 
 class ApproveRequest(APIModel):

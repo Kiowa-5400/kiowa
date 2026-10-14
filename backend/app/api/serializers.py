@@ -109,6 +109,7 @@ def board_application_detail(db: Session, application: Application) -> BoardAppl
             NoteOut(id=n.id, body=n.body, author_name=n.author.full_name if n.author else None, created_at=n.created_at)
             for n in application.notes
         ],
+        already_member=membership.member_skips_waiting_list(application),
     )
 
 

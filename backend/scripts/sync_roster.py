@@ -186,6 +186,9 @@ class Sync:
                 person.notes = f"{person.notes}\n{note}" if person.notes else note
         if membership.enroll_roster_member_in_texts(person):
             changes.append("signed up for texts")
+        # Someone who applied online before the roster made them a member no longer needs the waiting list.
+        for application in membership.close_unneeded_waiting_list(self.db, person, None, None):
+            changes.append(f"closed waiting-list application #{application.id}")
         if changes:
             self.counts["corrected"] += 1
             print(f"Correct {_label(person)}: " + "; ".join(changes))

@@ -649,3 +649,65 @@ def test_roster_match_is_checked_again_on_submit(api, db):
     upload(api, application["id"], "concealed_carry", JPEG, "ccl.jpg", "image/jpeg")
     response = submit(api, application["id"])
     assert response.status_code == 409 and "contact the board" in response.json()["detail"]
+
+
+def _approved_waiting_list(api, new_api, db, email: str):  # noqa: ANN202
+    """An applicant through review and approval, with the payment link sent, as Jodi was."""
+    member(api, email, **{**FULL_PROFILE, "nra_number": None})
+    application = start(api, "waiting_list")
+    api.patch(f"/api/applications/{application['id']}", json={"documentation_method": "background_check"})
+    upload(api, application["id"], "nra_proof")
+    upload(api, application["id"], "background_check")
+    submit(api, application["id"])
+    reviewer = new_api()
+    board(reviewer, db)
+    for document in reviewer.get(f"/api/board/applications/{application['id']}").json()["documents"]:
+        reviewer.post(f"/api/board/documents/{document['id']}/review", json={"review_status": "approved"})
+    return application, reviewer
+
+
+def _make_roster_member(db, email: str) -> None:
+    """What the roster import does: finds them by email and marks them a member."""
+    person = db.scalar(select(Person).where(Person.email == email))
+    person.membership_status = "member"
+    person.renewal_date = date.today() + timedelta(days=200)
+    db.commit()
+
+
+def test_roster_member_is_not_asked_to_pay_for_the_waiting_list(api, new_api, db, gateway):
+    application, reviewer = _approved_waiting_list(api, new_api, db, "jodi@example.com")
+    assert reviewer.post(f"/api/board/applications/{application['id']}/approve", json={}).status_code == 200
+    _make_roster_member(db, "jodi@example.com")
+
+    eligibility = api.get(f"/api/applications/{application['id']}").json()["eligibility"]
+    assert eligibility["eligible"] is False and any("already an active member" in r for r in eligibility["reasons"])
+    assert api.post(f"/api/applications/{application['id']}/checkout").status_code != 200
+    assert gateway.sessions == {}
+
+    # The board sees why and closes it, without emailing the member.
+    assert reviewer.get(f"/api/board/applications/{application['id']}").json()["already_member"] is True
+    sent = len(email_outbox())
+    closed = reviewer.post(f"/api/board/applications/{application['id']}/close-already-member")
+    assert closed.status_code == 200 and closed.json()["status"] == "withdrawn"
+    assert len(email_outbox()) == sent
+    assert api.get("/api/me").json()["membership_status"] == "member"
+
+
+def test_waiting_list_approval_refused_for_an_active_member(api, new_api, db):
+    application, reviewer = _approved_waiting_list(api, new_api, db, "early@example.com")
+    _make_roster_member(db, "early@example.com")
+    refused = reviewer.post(f"/api/board/applications/{application['id']}/approve", json={})
+    assert refused.status_code == 409 and "already an active member" in refused.json()["detail"]
+
+
+def test_board_making_someone_a_member_closes_their_waiting_list_application(api, new_api, db):
+    application, reviewer = _approved_waiting_list(api, new_api, db, "promoted@example.com")
+    person_id = reviewer.get(f"/api/board/applications/{application['id']}").json()["person_id"]
+    assert reviewer.patch(f"/api/board/people/{person_id}", json={"membership_status": "member"}).status_code == 200
+    assert api.get(f"/api/applications/{application['id']}").json()["status"] == "withdrawn"
+
+
+def test_close_is_only_for_active_members(api, new_api, db):
+    application, reviewer = _approved_waiting_list(api, new_api, db, "applicant@example.com")
+    assert reviewer.get(f"/api/board/applications/{application['id']}").json()["already_member"] is False
+    assert reviewer.post(f"/api/board/applications/{application['id']}/close-already-member").status_code == 409

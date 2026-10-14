@@ -14,6 +14,7 @@ type Summary = {
 type Doc = { id: number; document_type: string; label: string; original_filename: string; mime_type: string; uploaded_at: string; review_status: string; review_notes: string | null };
 
 type Detail = Summary & {
+  already_member?: boolean;
   documentation_method: string | null; claims_cleanup_discount: boolean; applicant_notes: string | null; rules_version: string | null;
   printed_name: string | null; signature_name: string | null; signed_at: string | null; info_request_message: string | null;
   decision_reason: string | null; payment_requested_at: string | null; documents: Doc[];
@@ -130,6 +131,14 @@ export function ApplicationDetail({ id }: { id: number }) {
         actions={<><Link className="btn" to={`/members/${a.applicant.id}`}>Contact record</Link><button type="button" className="btn btn-ghost" onClick={() => navigate('/applications')}>Back to list</button></>}
       />
       {message && <Alert kind="success">{message}</Alert>}
+      {a.already_member && (
+        <Alert kind="warning" title={`${a.applicant.name} is already an active member.`}>
+          <p>This waiting-list application isn't needed. This usually happens when someone applied online before being added from the club roster.</p>
+          <p>Closing it stops them being asked to pay. They won't be sent an email.</p>
+          <button type="button" className="btn btn-primary" disabled={act.busy}
+            onClick={() => void act.run('close-already-member', undefined, 'Closed. They are no longer asked to pay.')}>Close this application</button>
+        </Alert>
+      )}
       <FormErrors error={error} />
 
       <div className="detail-grid">

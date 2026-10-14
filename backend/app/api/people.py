@@ -229,6 +229,7 @@ def update_person(person_id: int, payload: PersonUpdate, request: Request, auth:
         if person.membership_status == "member":
             person.terminated_at = None
             person.member_since = person.member_since or club_today()
+            membership.close_unneeded_waiting_list(db, person, auth.person, context)
         elif person.membership_status == "terminated":
             person.terminated_at = now_utc()
     for flag in ("on_board", "on_shooting_committee", "nra_active", "nra_life_member", "member_number", "renewal_date", "notes"):
